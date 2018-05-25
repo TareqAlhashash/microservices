@@ -9,7 +9,7 @@ import org.springframework.cloud.openfeign.EnableFeignClients;
 @EnableFeignClients("com.investorbook")
 
 /**
- * enables eureka client to register this service in the naming server,
+ * enables eureka client to register this service in the naming server, 
  * using (from properties file) 'spring.application.name' value 'currency-conversion-service' as the name
  */
 @EnableDiscoveryClient
