@@ -6,6 +6,7 @@ import javax.persistence.Id;
 import javax.persistence.Table;
 import javax.persistence.Transient;
 import javax.validation.constraints.Email;
+import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -33,6 +34,8 @@ public class Member {
 
 	// this is not stored, used to receive the password string entered from the UI
 	@Transient
+	@Size(min = 6, message = "password must be at least 6 char long")
+	@NotNull(message = "password cannot be null")
 	private String password;
 
 	// salt+hash, never retrieve it back to the client
