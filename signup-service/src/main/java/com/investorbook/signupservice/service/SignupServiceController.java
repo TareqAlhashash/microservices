@@ -8,7 +8,6 @@ import javax.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -18,23 +17,12 @@ import com.investorbook.signupservice.bean.Member;
 import com.investorbook.signupservice.dao.MemberRepository;
 import com.investorbook.signupservice.exception.MemberAlreadyExistsException;
 import com.investorbook.signupservice.exception.MemberNotFoundException;
-import com.investorbook.signupservice.proxy.TestServiceProxy;
 
 @RestController
-public class SignupService {
-
-	@Autowired
-	private TestServiceProxy proxy;
+public class SignupServiceController {
 
 	@Autowired
 	private MemberRepository memberRepository;
-
-	@GetMapping("/signup")
-	public String retrieveValue() {
-
-		// call the test service
-		return proxy.retrieveTestServiceValue();
-	}
 
 	@PostMapping("/signup")
 	public ResponseEntity<Member> signUpMember(@Valid @RequestBody Member member) {
@@ -45,7 +33,7 @@ public class SignupService {
 
 		member.setPasswordHash(EncryptionUtil.encode(EncryptionUtil.hash(member.getPassword())));
 		
-		//TODO setup smtp to send welcome emails
+		//TODO call email service to send welcome message,this can be implemented using messaging to create the email asynchronously 
 		return ResponseEntity.ok(memberRepository.save(member));
 	}
 
