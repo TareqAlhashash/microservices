@@ -1,4 +1,4 @@
-package com.investorbook.signupservice.bean;
+package com.investorbook.signupservice.dao.entites;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;

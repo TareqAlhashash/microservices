@@ -14,8 +14,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.investorbook.common.util.EncryptionUtil;
-import com.investorbook.signupservice.bean.MemberEntity;
 import com.investorbook.signupservice.dao.MemberRepository;
+import com.investorbook.signupservice.dao.entites.MemberEntity;
 import com.investorbook.signupservice.dto.Member;
 import com.investorbook.signupservice.exception.MemberAlreadyExistsException;
 import com.investorbook.signupservice.exception.MemberNotFoundException;
@@ -51,8 +51,6 @@ public class SignupServiceController {
 
 	@PostMapping("/signin")
 	public ResponseEntity<Member> signInMember(@Valid @RequestBody Member memberDto) {
-		// user not found
-
 		Optional<MemberEntity> existingMember = memberRepository.findById(memberDto.getEmail());
 		if (!existingMember.isPresent()) {
 			throw new MemberNotFoundException(memberDto.getEmail() + " is not found please sign up");
