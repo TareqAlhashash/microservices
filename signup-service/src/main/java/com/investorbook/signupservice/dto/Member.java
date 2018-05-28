@@ -7,7 +7,7 @@ import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 
 @ApiModel(description = "all member details.")
-public class MemberDto {
+public class Member {
 
 	@ApiModelProperty(notes = "Email Address")
 	private String email;
@@ -25,11 +25,11 @@ public class MemberDto {
 	@NotNull(message = "password cannot be null")
 	private String password;
 
-	protected MemberDto() {
+	protected Member() {
 		super();
 	}
 
-	public MemberDto(String email, String firstName, String lastName, String password) {
+	public Member(String email, String firstName, String lastName, String password) {
 		super();
 		this.email = email;
 		this.firstName = firstName;

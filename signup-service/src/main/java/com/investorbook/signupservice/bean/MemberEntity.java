@@ -8,7 +8,7 @@ import javax.validation.constraints.Email;
 
 @Entity
 @Table(name = "members")
-public class Member {
+public class MemberEntity {
 	@Id
 	@Email
 	private String email;
@@ -22,11 +22,11 @@ public class Member {
 	@Column(name = "passwordhash")
 	private byte[] passwordHash;
 
-	public Member() {
+	public MemberEntity() {
 		super();
 	}
 
-	public Member(String email, String firstName, String lastName) {
+	public MemberEntity(String email, String firstName, String lastName) {
 		super();
 		this.email = email;
 		this.firstName = firstName;
