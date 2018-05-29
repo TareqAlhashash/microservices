@@ -31,6 +31,7 @@ website (string) : The person's personal website
 work List<WorkExperience> : person's work experience history
 updated_time (datetime) : Updated time
 
+symbols(string) : The person's favorite stock symbols
 quotes(string) : The person's favorite quotes
 verified (bool) : Indicates whether the account has been verified
 is_verified (boolean) : People with large numbers of followers can have the authenticity of their identity manually verified by InvestorBook. This field indicates whether the person's profile is verified in this way. This is distinct from the verified field
