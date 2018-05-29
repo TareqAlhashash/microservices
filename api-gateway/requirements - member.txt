@@ -1,0 +1,52 @@
+Member
+A user represents a person on investorbook. The /member/{user-id} node returns a single user.
+
+Reading
+Returns a Member.
+
+Parameters
+This endpoint doesn't have any parameters.
+
+
+Fields
+about (string) 
+
+
+******* Demographics ********
+id (numeric string) : The id of this person's user account. This ID is unique to each app and cannot be used across different apps
+first_name (string) : The person's first name
+last_name (string)  : The person's last name
+email (string)      : The User's primary email address listed on their profile. This field will not be returned if no valid email address is available
+address (location)  : The User's address
+birthday (string)   : The person's birthday. This is a fixed format string, like MM/DD/YYYY. However, people can control who can see the year they were born separately from the month and day so this string can be only the year (YYYY) or the month + day (MM/DD)
+gender (string)     : The gender selected by this person, male or female. If the gender is set to a custom value, this value will be based off of the preferred pronoun; it will be omitted if the preferred preferred pronoun is neutral
+profile_pic (string) : The profile picture url of the messenger user
+hometown (String)   : The person's hometown
+locale(string) : The person's locale
+timezone float (min: -24) (max: 24) : The person's current timezone offset from UTC.
+languages list<String> : InvestorBook Pages representing the languages this person knows 
+
+currency (Currency) : The person's local currency information
+website (string) : The person's personal website
+work List<WorkExperience> : person's work experience history
+updated_time (datetime) : Updated time
+
+quotes(string) : The person's favorite quotes
+verified (bool) : Indicates whether the account has been verified
+is_verified (boolean) : People with large numbers of followers can have the authenticity of their identity manually verified by InvestorBook. This field indicates whether the person's profile is verified in this way. This is distinct from the verified field
+******** 
+
+
+
+Updating
+You can update a User by making a POST request to /member/{user_id}.
+
+
+Return Type
+This endpoint supports read-after-write and will read the node to which you POSTed.
+
+Struct {
+success: bool,
+}
+
+
