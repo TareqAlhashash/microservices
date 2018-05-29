@@ -6,6 +6,8 @@ import java.util.Optional;
 import javax.validation.Valid;
 
 import org.modelmapper.ModelMapper;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +25,8 @@ import com.investorbook.signupservice.exception.MemberNotFoundException;
 @RestController
 public class SignupServiceController {
 
+	private Logger logger = LoggerFactory.getLogger(this.getClass());
+	
 	@Autowired
 	private MemberRepository memberRepository;
 
@@ -30,7 +34,9 @@ public class SignupServiceController {
 	
 	@PostMapping("/signup")
 	public ResponseEntity<Member> signUpMember(@Valid @RequestBody Member memberDto) {
-		// member already exists
+		
+		logger.info("{}",memberDto.getEmail());
+		
 		if (memberRepository.existsById(memberDto.getEmail())) {
 			throw new MemberAlreadyExistsException("email already exists");
 		}
