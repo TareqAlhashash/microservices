@@ -5,14 +5,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.cloud.netflix.zuul.EnableZuulProxy;
 
-@SpringBootApplication
-//an API Gateway 
-@EnableZuulProxy
-
 /**
-* enables eureka client to register this service in the naming server,
-* using (from properties file) 'spring.application.name' value 'currency-conversion-service' as the name
-*/
+ * enables eureka client to register this service in the naming server, using
+ * (from properties file) 'spring.application.name' value
+ * 'currency-conversion-service' as the name
+ */
+@SpringBootApplication
+@EnableZuulProxy
 @EnableDiscoveryClient
 public class ApiGatewayApplication {
 
