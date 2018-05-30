@@ -1,0 +1,43 @@
+https://en.wikipedia.org/wiki/Security_(finance)#Investment
+https://www.investopedia.com/terms/s/security.asp
+https://www.quicken.com/what-financial-security
+
+
+Security
+A security represents a tradable financial asset (stocks, futures, options, bonds..) The /security/{security-id} node returns a single security.
+
+Note - initial offering will only include stocks, other security option will be supported later
+
+Reading
+Returns a security.
+
+Parameters
+This endpoint doesn't have any parameters.
+
+
+Fields
+Id (numeric string) : The id of this person's user account. This ID is unique to each app and cannot be used across different apps
+Ticker (string) : A ticker symbol is an arrangement of characters (usually letters) representing a particular security listed on an exchange or otherwise traded publicly
+Name(String)    : security name
+About  (string) : Description about the company or security
+Exchange (String) : Stock or security exchange name
+Type (String)   : security type (equity securities,debt securities,derivatives)
+ 
+Verified (bool) : Indicates whether the account has been verified
+is_verified (boolean) : People with large numbers of followers can have the authenticity of their identity manually verified by InvestorBook. This field indicates whether the person's profile is verified in this way. This is distinct from the verified field
+******** 
+
+
+
+Updating
+You can update a User by making a POST request to /security/{security_id}.
+
+
+Return Type
+This endpoint supports read-after-write and will read the node to which you POSTed.
+
+Struct {
+success: bool,
+}
+
+
