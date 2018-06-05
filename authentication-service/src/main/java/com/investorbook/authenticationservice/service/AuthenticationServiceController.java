@@ -1,6 +1,7 @@
 package com.investorbook.authenticationservice.service;
 
 import java.util.Arrays;
+import java.util.Optional;
 
 import javax.validation.Valid;
 
@@ -11,30 +12,30 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.investorbook.authenticationservice.dao.AuthenticationRepository;
+import com.investorbook.authenticationservice.dao.entities.AuthenticationEntity;
 import com.investorbook.authenticationservice.dto.Member;
 import com.investorbook.authenticationservice.exception.AuthenticationException;
-import com.investorbook.authenticationservice.proxy.MemberServiceProxy;
 import com.investorbook.common.util.EncryptionUtil;
 
 @RestController
 public class AuthenticationServiceController {
 
 	@Autowired
-	MemberServiceProxy proxy;
+	AuthenticationRepository repository;
 
 	@PostMapping("/signin")
 	public ResponseEntity<String> signInMember(@Valid @RequestBody Member memberDto) {
-		byte[] passwordHash;
-		try {
-			passwordHash = proxy.getMember(memberDto.getEmail());
-		} catch (RuntimeException e) {
-			throw new AuthenticationException("auth failed for: " + memberDto.getEmail());
-		}
-
+		
+			Optional<AuthenticationEntity> member = repository.findOptionalByEmail(memberDto.getEmail());
+			if(!member.isPresent()) {
+				throw new AuthenticationException("auth failed for: " + memberDto.getEmail() + " member not found");		
+			}
+		
 		// hash the password to match with the existing password
-		byte[] password = EncryptionUtil.hashToMatch(memberDto.getPassword(), EncryptionUtil.decode(passwordHash));
+		byte[] password = EncryptionUtil.hashToMatch(memberDto.getPassword(), EncryptionUtil.decode(member.get().getPasswordHash()));
 
-		if (Arrays.equals(password, EncryptionUtil.decode(passwordHash))) {
+		if (Arrays.equals(password, EncryptionUtil.decode(member.get().getPasswordHash()))) {
 			// TODO create token;
 			return ResponseEntity.accepted().build();
 		}

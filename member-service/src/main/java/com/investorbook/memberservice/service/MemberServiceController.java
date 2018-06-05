@@ -2,7 +2,6 @@ package com.investorbook.memberservice.service;
 
 import java.util.Optional;
 
-import javax.annotation.security.RolesAllowed;
 import javax.validation.Valid;
 
 import org.modelmapper.ModelMapper;
@@ -68,14 +67,4 @@ public class MemberServiceController {
 		return ResponseEntity.ok(modelMapper.map(existingMember.get(), Member.class));
 	}
 	
-	@GetMapping("/member/password/{email}")
-	//@RolesAllowed("authentication-service")
-	public byte[] getMemberPassword(@PathVariable String email) {
-		Optional<MemberEntity> existingMember = memberRepository.findOptionalByEmail(email);
-		if (!existingMember.isPresent()) {
-			throw new MemberNotFoundException(email + " is not found please sign up");
-		}
-		return existingMember.get().getPasswordHash();
-	}
-
 }
