@@ -20,21 +20,26 @@ public class Member {
 	@ApiModelProperty(notes = "lastname should have at least 1 character")
 	private String lastName;
 
-	
 	@Size(min = 6, message = "password must be at least 6 char long")
 	@NotNull(message = "password cannot be null")
 	private String password;
+
+	private String about;
+
+	private Address address;
 
 	protected Member() {
 		super();
 	}
 
-	public Member(String email, String firstName, String lastName, String password) {
+	public Member(String email, String firstName, String lastName, String password, String about, Address address) {
 		super();
 		this.email = email;
 		this.firstName = firstName;
 		this.lastName = lastName;
 		this.password = password;
+		this.about = about;
+		this.address = address;
 	}
 
 	public String getEmail() {
@@ -68,4 +73,21 @@ public class Member {
 	public void setPassword(String password) {
 		this.password = password;
 	}
+
+	public String getAbout() {
+		return about;
+	}
+
+	public void setAbout(String about) {
+		this.about = about;
+	}
+
+	public Address getAddress() {
+		return address;
+	}
+
+	public void setAddress(Address address) {
+		this.address = address;
+	}
+
 }

@@ -1,4 +1,4 @@
-package com.investorbook.apigateway;
+package com.investorbook.apigateway.filters;
 
 import javax.servlet.http.HttpServletRequest;
 

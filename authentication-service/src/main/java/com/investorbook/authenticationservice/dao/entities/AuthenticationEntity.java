@@ -19,14 +19,14 @@ import javax.validation.constraints.Email;
 public class AuthenticationEntity {
 
 	@Id
-	@Column(name = "member_id")
-	private String memberId;
+	@Column(name = "id")
+	private String id;
 	
 	@Email
 	@Column(unique = true)
 	private String email;
 
-	@Column(name = "passwordhash")
+	@Column(name = "password_hash")
 	private byte[] passwordHash;
 
 	public AuthenticationEntity() {

@@ -10,7 +10,7 @@ import io.swagger.annotations.ApiModelProperty;
 public class Member {
 	
 	@ApiModelProperty(notes = "member Id")
-	private String memberId;
+	private String id;
 
 	@ApiModelProperty(notes = "Email Address")
 	private String email;
@@ -31,9 +31,9 @@ public class Member {
 		super();
 	}
 
-	public Member(String memberId, String email, String firstName, String lastName, String password) {
+	public Member(String id, String email, String firstName, String lastName, String password) {
 		super();
-		this.memberId = memberId;
+		this.id = id;
 		this.email = email;
 		this.firstName = firstName;
 		this.lastName = lastName;
@@ -42,8 +42,8 @@ public class Member {
 
 	
 
-	public String getMemberId() {
-		return memberId;
+	public String getId() {
+		return id;
 	}
 
 	public String getEmail() {
