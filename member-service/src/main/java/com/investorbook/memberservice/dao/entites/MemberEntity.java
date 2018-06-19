@@ -38,14 +38,14 @@ public class MemberEntity {
 	private AddressEntity address;
 
 	@Column(name = "password_hash")
-	private byte[] passwordHash;
+	private String passwordHash;
 
 	public MemberEntity() {
 		super();
 	}
 
 	public MemberEntity(@Email String email, String firstName, String lastName, String about, AddressEntity address,
-			byte[] passwordHash) {
+			String passwordHash) {
 		super();
 		this.email = email;
 		this.firstName = firstName;
@@ -79,11 +79,11 @@ public class MemberEntity {
 		this.lastName = lastName;
 	}
 
-	public byte[] getPasswordHash() {
+	public String getPasswordHash() {
 		return passwordHash;
 	}
 
-	public void setPasswordHash(byte[] passwordHash) {
+	public void setPasswordHash(String passwordHash) {
 		this.passwordHash = passwordHash;
 	}
 
