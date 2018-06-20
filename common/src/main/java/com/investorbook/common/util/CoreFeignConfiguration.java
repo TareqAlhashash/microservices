@@ -1,4 +1,4 @@
-package com.investorbook.apigateway.config;
+package com.investorbook.common.util;
 
 import org.springframework.beans.factory.ObjectFactory;
 import org.springframework.beans.factory.annotation.Autowired;

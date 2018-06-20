@@ -1,4 +1,4 @@
-package com.investorbook.apigateway.dto;
+package com.investorbook.common.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 

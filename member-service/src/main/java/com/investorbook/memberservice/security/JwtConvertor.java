@@ -1,4 +1,4 @@
-package com.investorbook.resourceservice.secuirty;
+package com.investorbook.memberservice.security;
 
 import java.util.Map;
 

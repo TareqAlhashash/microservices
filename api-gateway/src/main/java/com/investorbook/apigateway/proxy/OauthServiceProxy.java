@@ -7,8 +7,8 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 
-import com.investorbook.apigateway.config.CoreFeignConfiguration;
-import com.investorbook.apigateway.dto.AuthResponse;
+import com.investorbook.common.dto.AuthResponse;
+import com.investorbook.common.util.CoreFeignConfiguration;
 
 import feign.Headers;
 
