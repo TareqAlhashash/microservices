@@ -10,11 +10,11 @@ public class JwtUtil {
 
 	private static final String USER_NAME = "user_name";
 
-	public Optional<String> getEmail(Authentication auth) {
+	public static Optional<String> getEmail(Authentication auth) {
 		return getClaim(auth, USER_NAME);
 	}
 
-	public Optional<String> getClaim(Authentication auth, String claim) {
+	public static Optional<String> getClaim(Authentication auth, String claim) {
 
 		Object details = auth.getDetails();
 		if (details instanceof OAuth2AuthenticationDetails) {

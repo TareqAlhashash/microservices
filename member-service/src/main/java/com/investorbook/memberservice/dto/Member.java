@@ -3,6 +3,9 @@ package com.investorbook.memberservice.dto;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonProperty.Access;
+
 import io.swagger.annotations.ApiModel;
 import io.swagger.annotations.ApiModelProperty;
 
@@ -10,6 +13,8 @@ import io.swagger.annotations.ApiModelProperty;
 public class Member {
 
 	@ApiModelProperty(notes = "Email Address")
+	// so it wont be retrieved in the response
+	@JsonProperty(access = Access.WRITE_ONLY)
 	private String email;
 
 	@Size(min = 1, message = "firstname must be at least 1 char long")
@@ -22,6 +27,8 @@ public class Member {
 
 	@Size(min = 6, message = "password must be at least 6 char long")
 	@NotNull(message = "password cannot be null")
+	// so it wont be retrieved in the response
+	@JsonProperty(access = Access.WRITE_ONLY)
 	private String password;
 
 	private String about;

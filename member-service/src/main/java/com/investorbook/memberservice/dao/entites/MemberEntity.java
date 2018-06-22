@@ -40,12 +40,15 @@ public class MemberEntity {
 	@Column(name = "password_hash")
 	private String passwordHash;
 
+	@Column(name = "photo_url")
+	private String photoUrl;
+
 	public MemberEntity() {
 		super();
 	}
 
 	public MemberEntity(@Email String email, String firstName, String lastName, String about, AddressEntity address,
-			String passwordHash) {
+			String passwordHash, String photoUrl) {
 		super();
 		this.email = email;
 		this.firstName = firstName;
@@ -53,6 +56,7 @@ public class MemberEntity {
 		this.about = about;
 		this.address = address;
 		this.passwordHash = passwordHash;
+		this.photoUrl = photoUrl;
 	}
 
 	public String getEmail() {
@@ -105,6 +109,14 @@ public class MemberEntity {
 
 	public void setAddress(AddressEntity address) {
 		this.address = address;
+	}
+
+	public String getPhotoUrl() {
+		return photoUrl;
+	}
+
+	public void setPhotoUrl(String photoUrl) {
+		this.photoUrl = photoUrl;
 	}
 
 }

@@ -1,8 +1,14 @@
 package com.investorbook.memberservice.service;
 
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import java.net.URL;
 import java.util.Optional;
 
+import javax.imageio.ImageIO;
 import javax.validation.Valid;
+import javax.ws.rs.Produces;
 
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
@@ -15,11 +21,13 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import com.investorbook.common.aws.S3Utils;
 import com.investorbook.common.dto.AuthRequest;
 import com.investorbook.common.dto.AuthResponse;
 import com.investorbook.common.util.JwtUtil;
@@ -28,6 +36,7 @@ import com.investorbook.memberservice.dao.entites.MemberEntity;
 import com.investorbook.memberservice.dto.Member;
 import com.investorbook.memberservice.exception.MemberAlreadyExistsException;
 import com.investorbook.memberservice.exception.MemberNotFoundException;
+import com.investorbook.memberservice.exception.MemberUploadPicException;
 import com.investorbook.memberservice.proxy.AuthenticationServiceProxy;
 
 @RestController
@@ -40,8 +49,6 @@ public class MemberServiceController {
 
 	@Autowired
 	private AuthenticationServiceProxy authenticationServiceProxy;
-
-	private JwtUtil jwtUtil = new JwtUtil();
 
 	@Bean
 	public PasswordEncoder passwordEncoder() {
@@ -80,9 +87,10 @@ public class MemberServiceController {
 	 * @param email
 	 * @return
 	 */
-	@GetMapping("/member/{email}")
+	@GetMapping("/member")
 	@PreAuthorize("hasRole('MEMBER')")
-	public ResponseEntity<Member> getMember(@PathVariable String email) {
+	public ResponseEntity<Member> getMember() {
+		String email = JwtUtil.getEmail(SecurityContextHolder.getContext().getAuthentication()).get();
 		Optional<MemberEntity> existingMember = memberRepository.findOptionalByEmail(email);
 		if (!existingMember.isPresent()) {
 			throw new MemberNotFoundException(email + " is not found please sign up");
@@ -100,33 +108,51 @@ public class MemberServiceController {
 	@PostMapping("/member")
 	@PreAuthorize("hasRole('MEMBER')")
 	public ResponseEntity<Member> updateMember(@Valid @RequestBody Member memberDto) {
-		Optional<MemberEntity> existingMember = memberRepository.findOptionalByEmail(memberDto.getEmail());
+		String email = JwtUtil.getEmail(SecurityContextHolder.getContext().getAuthentication()).get();
+		// ignore any email sent, we only use the token email
+		memberDto.setEmail(email);
+
+		// retrieve the member
+		Optional<MemberEntity> existingMember = memberRepository.findOptionalByEmail(email);
 		if (!existingMember.isPresent()) {
-			throw new MemberNotFoundException(memberDto.getEmail() + " is not found please sign up");
+			throw new MemberNotFoundException(email + " is not found please sign up");
 		}
+
 		ModelMapper modelMapper = new ModelMapper();
 		modelMapper.map(memberDto, existingMember.get());
 
-		// TODO razi? do i have to to this step manually, setting the member in address?
+		// set the reference for sub entities
 		existingMember.get().getAddress().setMember(existingMember.get());
 
 		memberRepository.save(existingMember.get());
 		return ResponseEntity.ok(memberDto);
 	}
 
-	@GetMapping("/member/photo")
+	@PostMapping("/member/pic")
 	@PreAuthorize("hasRole('MEMBER')")
-	// @Produces("image/jpeg")
-	public String getMemberPhoto() {
-		// TODO get logged member from token and retrieve the url for the image
-
+	public String uploadMemberPic(@RequestPart(value = "file") MultipartFile file) {
+		String email = JwtUtil.getEmail(SecurityContextHolder.getContext().getAuthentication()).get();
+		MemberEntity member = memberRepository.findOptionalByEmail(email).get();
+		String url = "";
 		try {
-
-			// return ImageIO.read(new File("G:/test.jpg"));
-			return jwtUtil.getEmail(SecurityContextHolder.getContext().getAuthentication()).get();
-		} catch (Exception e) {
-			throw new RuntimeException("error while retrieving the image");
+			url = S3Utils.uploadProfilePic(file, member.getId());
+			member.setPhotoUrl(url);
+			memberRepository.save(member);
+		} catch (IOException e1) {
+			throw new MemberUploadPicException("could not upload pic", e1);
 		}
+
+		return S3Utils.getPresignedUrl(url).toString();
+
+	}
+
+	@GetMapping("/member/pic")
+	@PreAuthorize("hasRole('MEMBER')")
+	public String getMemberPic() {
+		String email = JwtUtil.getEmail(SecurityContextHolder.getContext().getAuthentication()).get();
+		URL url = S3Utils.getPresignedUrl(memberRepository.findOptionalByEmail(email).get().getPhotoUrl());
+		return url.toString();
+
 	}
 
 }
