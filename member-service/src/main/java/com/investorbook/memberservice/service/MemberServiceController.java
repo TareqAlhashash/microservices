@@ -65,6 +65,13 @@ public class MemberServiceController {
 
 		member.setPasswordHash(passwordEncoder.encode(memberDto.getPassword()));
 
+		// AddressEntity shares its primary key with the member via @MapsId, which
+		// Hibernate derives from this back-reference - without it, saving a member
+		// with an address fails outright (IdentifierGenerationException).
+		if (member.getAddress() != null) {
+			member.getAddress().setMember(member);
+		}
+
 		memberRepository.save(member);
 
 		// login and create a token and send it back
