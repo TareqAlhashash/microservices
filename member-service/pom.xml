@@ -164,17 +164,6 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<configuration>
-					<!-- Testcontainers/docker-java default to negotiating an older Docker
-					     API version than Docker Engine 29+ accepts (min 1.40); pin it. -->
-					<environmentVariables>
-						<DOCKER_API_VERSION>1.41</DOCKER_API_VERSION>
-					</environmentVariables>
-				</configuration>
-			</plugin>
 		</plugins>
 	</build>
 
