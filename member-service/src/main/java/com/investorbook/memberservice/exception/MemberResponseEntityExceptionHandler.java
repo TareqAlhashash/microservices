@@ -30,7 +30,7 @@ public class MemberResponseEntityExceptionHandler extends CustomizedResponseEnti
 	public final ResponseEntity<Object> handleMemberAlreadyExistsException(Exception ex, WebRequest request) {
 		ExceptionResponse exceptionResponse = new ExceptionResponse(new Date(), ex.getMessage(),
 				request.getDescription(false));
-		return new ResponseEntity<>(exceptionResponse, HttpStatus.FOUND);
+		return new ResponseEntity<>(exceptionResponse, HttpStatus.CONFLICT);
 	}
 
 	@ExceptionHandler(MemberUploadPicException.class)
