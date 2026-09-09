@@ -52,7 +52,7 @@ import com.investorbook.memberservice.proxy.AuthenticationServiceProxy;
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = { "eureka.client.enabled=false",
 		"security.oauth2.resource.jwt.key-value=test-signing-secret-please-ignore" })
 @Testcontainers
-class MemberServiceApiIntegrationTest {
+class MemberServiceApiIT {
 
 	private static final String SIGNING_KEY = "test-signing-secret-please-ignore";
 

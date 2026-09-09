@@ -28,7 +28,7 @@ import com.amazonaws.services.s3.AmazonS3ClientBuilder;
  * member-service is its only consumer.
  */
 @Testcontainers
-class ProfilePictureStorageIntegrationTest {
+class ProfilePictureStorageIT {
 
 	private static final String BUCKET = "test-profile-pics";
 

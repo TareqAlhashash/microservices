@@ -164,6 +164,22 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<!-- Runs *IT.java classes (the Docker/Testcontainers-backed integration tests)
+			     separately from Surefire's *Test.java unit tests. Surefire's default include
+			     pattern doesn't match *IT.java, so `mvn test` (and anything that stops at
+			     test/package/install) never touches Docker at all - only `mvn verify` does. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 			<!-- Static analysis for known insecure code patterns (injection, weak crypto,
 			     path traversal, etc.). Fast and offline, so it runs on every verify. -->
 			<plugin>

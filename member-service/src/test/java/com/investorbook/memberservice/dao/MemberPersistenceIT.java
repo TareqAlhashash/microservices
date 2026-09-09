@@ -29,8 +29,8 @@ import com.investorbook.memberservice.dao.entites.MemberEntity;
 // @SpringBootConfiguration - pulling in @EnableResourceServer and failing for
 // missing security beans this slice has no business needing. A minimal,
 // dao-package-scoped bootstrap class sidesteps that entirely.
-@ContextConfiguration(classes = MemberPersistenceIntegrationTest.TestConfig.class)
-class MemberPersistenceIntegrationTest {
+@ContextConfiguration(classes = MemberPersistenceIT.TestConfig.class)
+class MemberPersistenceIT {
 
 	@SpringBootApplication
 	static class TestConfig {

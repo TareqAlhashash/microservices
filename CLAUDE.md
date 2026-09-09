@@ -35,36 +35,77 @@ building either of those, since there is no multi-module reactor to sequence it 
 cd common && mvn clean install
 ```
 
-### member-service: tests, security scan, and Docker
+### Testing status per module (verified, not assumed)
 
-`member-service` is the only module with real tests, and its `mvn verify` needs Docker running —
-`MemberPersistenceIntegrationTest`, `MemberServiceApiIntegrationTest`, and
-`ProfilePictureStorageIntegrationTest` all spin up Testcontainers (Postgres and/or LocalStack).
-`mvn test` alone is enough for the pure unit tests (`MemberServiceControllerTest`,
-`MemberResponseEntityExceptionHandlerTest`) if Docker isn't available, but the integration tests
-will fail to start a container without it.
+Each module's real, checked test status on this machine (Windows, JDK 21, Docker Desktop
+available). Don't assume `mvn test`/`mvn verify` works the same way across modules — it doesn't.
+
+| Module | `mvn test` | `mvn verify` | Notes |
+|---|---|---|---|
+| `member-service` | **12 unit tests, no Docker** | +9 integration tests, **needs Docker** | See below |
+| `auth-service` | nothing to run | nothing to run | Compiles fine on JDK 21; has zero test files |
+| `api-gateway` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
+| `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
+| `resource-service` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
+| `common` | nothing to run | nothing to run | Library, no tests |
+
+#### member-service: unit vs. integration tests, and Docker
+
+`member-service` splits tests by Maven's own naming convention rather than mixing everything into
+Surefire: `*Test.java` (unit, mocked collaborators, no I/O) runs under Surefire during `mvn test`;
+`*IT.java` (real Postgres via Testcontainers, real S3 via LocalStack, or a full HTTP+security
+round trip) runs under Failsafe, bound to `integration-test`/`verify` only. This means **`mvn test`
+never touches Docker**, on this module or any other — only `mvn verify` (or a direct
+`mvn failsafe:integration-test`) does. If you add a new test class here, name it `*Test.java` for
+a fast, mocked-collaborator test or `*IT.java` for one that needs a real Postgres/S3/HTTP round
+trip — Surefire and Failsafe's default include patterns key off that suffix, so nothing else needs
+touching to keep the split working.
 
 ```bash
-cd member-service && mvn verify                                  # everything, needs Docker
-cd member-service && mvn test -Dtest=MemberServiceControllerTest # one test class, no Docker needed
+cd member-service && mvn test                                     # 12 tests, seconds, no Docker
+cd member-service && mvn verify                                   # +9 integration tests, needs Docker
+cd member-service && mvn test -Dtest=MemberServiceControllerTest  # one unit test class
+cd member-service && mvn failsafe:integration-test -Dit.test=MemberPersistenceIT  # one IT class
 ```
 
 If Testcontainers fails with "Could not find a valid Docker environment" on a 400 rather than a
 connection error, it's very likely the Docker-Engine-29+-vs-old-docker-java API version mismatch,
 not a real Docker problem — see `member-service/src/test/resources/docker-java.properties`, which
-already pins `api.version=1.41` for exactly this reason. Neither a `DOCKER_API_VERSION` env var nor
+already pins `api.version=1.44` for exactly this reason. Neither a `DOCKER_API_VERSION` env var nor
 a Surefire-injected system property reaches this check; only that properties file does.
 
-`mvn verify` also runs SpotBugs + FindSecBugs (bound to the `verify` phase, fast, fully offline).
-Findings are triaged in `member-service/spotbugs-exclude.xml` with documented reasons — extend that
-file rather than adding a bare `@SuppressFBWarnings` with no justification, and never suppress a new
-finding without writing down why it's not a real issue. OWASP Dependency-Check is declared in the
-pom too but deliberately **not** bound to a lifecycle phase: without an `NVD_API_KEY` its first NVD
-sync can take hours under current rate limits. Run it explicitly when you have a key:
+`mvn verify` also runs SpotBugs + FindSecBugs (bound to the `verify` phase, fast, fully offline —
+it runs regardless of whether Docker is available). Findings are triaged in
+`member-service/spotbugs-exclude.xml` with documented reasons — extend that file rather than
+adding a bare `@SuppressFBWarnings` with no justification, and never suppress a new finding
+without writing down why it's not a real issue. OWASP Dependency-Check is declared in the pom too
+but deliberately **not** bound to a lifecycle phase: without an `NVD_API_KEY` its first NVD sync
+can take hours under current rate limits. Run it explicitly when you have a key:
 
 ```bash
 NVD_API_KEY=<key> mvn org.owasp:dependency-check-maven:check
 ```
+
+#### JDK 21 incompatibility in the untouched services
+
+`api-gateway`, `eureka-server`, and `resource-service` each fail their single generated
+`contextLoads()` smoke test on this JDK with the same root cause:
+
+```
+IllegalStateException: Cannot load configuration class: PropertySourceBootstrapConfiguration
+Caused by: ExceptionInInitializerError
+Caused by: CodeGenerationException: InaccessibleObjectException: Unable to make protected final
+  java.lang.Class java.lang.ClassLoader.defineClass(...) accessible: module java.base does not
+  "opens java.lang" to unnamed module
+```
+
+Spring 5.0.6 (pulled in by Boot 2.0.2) generates cglib proxies via reflection on
+`ClassLoader.defineClass`, which the JPMS module system blocks from Java 16 onward without an
+explicit `--add-opens`. A quick `-DargLine="--add-opens java.base/java.lang=ALL-UNNAMED"` did
+**not** resolve it in a direct check — this needs either JDK 8/11 (what Boot 2.0.2 actually
+targets and was never validated past) or the same kind of Boot version bump `member-service` got,
+which was deliberately not done here (see "Why member-service is on a different Boot version").
+Confirmed by actually running each module's tests, not inferred from the version number alone.
 
 ### Running the full system locally
 
