@@ -23,8 +23,11 @@
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>1.8</java.version>
 		<spring-cloud.version>Hoxton.SR12</spring-cloud.version>
-		<!-- Boot 2.2's managed Mockito predates JDK 17+ bytecode support; override to a modern release. -->
+		<!-- Boot 2.2's managed Mockito predates JDK 17+ bytecode support; override to a modern
+		     release, and byte-buddy along with it since Boot's BOM otherwise pins it to a version
+		     too old for this Mockito (missing classes -> NoClassDefFoundError at mock-creation time). -->
 		<mockito.version>5.11.0</mockito.version>
+		<byte-buddy.version>1.14.13</byte-buddy.version>
 		<testcontainers.version>1.19.8</testcontainers.version>
 	</properties>
 
