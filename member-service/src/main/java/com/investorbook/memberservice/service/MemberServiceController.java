@@ -8,7 +8,6 @@ import java.util.Optional;
 
 import javax.imageio.ImageIO;
 import javax.validation.Valid;
-import javax.ws.rs.Produces;
 
 import org.modelmapper.ModelMapper;
 import org.slf4j.Logger;
