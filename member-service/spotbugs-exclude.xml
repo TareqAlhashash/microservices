@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    EI_EXPOSE_REP / EI_EXPOSE_REP2: JPA entities (AddressEntity, MemberEntity) intentionally
+    return and store their associated entities by reference rather than defensively copying
+    them. Hibernate's lazy-loading proxies and dirty-checking depend on identity, not value
+    equality - a defensive copy here would silently break both. Member (a mapper-populated
+    request/response DTO with no business logic of its own, never shared across threads or a
+    trust boundary beyond a single request) gets the same treatment for consistency; copying
+    it buys nothing a fresh-per-request object doesn't already give for free.
+    -->
+    <Match>
+        <Or>
+            <Class name="com.investorbook.memberservice.dao.entites.AddressEntity" />
+            <Class name="com.investorbook.memberservice.dao.entites.MemberEntity" />
+            <Class name="com.investorbook.memberservice.dto.Member" />
+        </Or>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2" />
+    </Match>
+
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect. Every controller and Feign proxy in the app trips it by design; treating
+    it as actionable noise would bury real findings. The taint-flow findings it exists to
+    anchor (injection, CRLF, etc.) still get reported and still fail the build.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+</FindBugsFilter>

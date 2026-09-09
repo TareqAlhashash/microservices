@@ -53,7 +53,7 @@ public class MemberServiceController {
 	@PostMapping("/signup")
 	public ResponseEntity<AuthResponse> signUpMember(@Valid @RequestBody Member memberDto) {
 
-		logger.info("{}", memberDto.getEmail());
+		logger.info("signup requested for {}", sanitizeForLog(memberDto.getEmail()));
 
 		if (memberRepository.findOptionalByEmail(memberDto.getEmail()).isPresent()) {
 			throw new MemberAlreadyExistsException("email already exists");
@@ -145,6 +145,12 @@ public class MemberServiceController {
 	private MemberEntity findMemberByEmailOrThrow(String email) {
 		Optional<MemberEntity> member = memberRepository.findOptionalByEmail(email);
 		return member.orElseThrow(() -> new MemberNotFoundException(email + " is not found please sign up"));
+	}
+
+	// Strips CR/LF so untrusted input (e.g. an email a caller controls) can't forge
+	// extra log lines or corrupt log-file structure (CRLF/log injection).
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 
 	private static String currentEmail() {
