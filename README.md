@@ -26,8 +26,8 @@ done. Three of my own Claude Code skills encode that workflow as agent instructi
 this repo at [`.claude/skills/`](.claude/skills/) so they're readable, not just described:
 
 - **[`bugfix-workflow`](.claude/skills/bugfix-workflow/SKILL.md)** — reproduce a bug with a
-  failing test first, fix the root cause, drive the suite green, extend coverage where the bug
-  revealed a gap, run the security scan, only then call it done.
+  failing test first, fix the root cause, code-review the fix, drive the suite green, extend
+  coverage where the bug revealed a gap, run the security scan, only then call it done.
 - **[`integration-test-loop`](.claude/skills/integration-test-loop/SKILL.md)** — runs the suite;
   on failure, diagnoses whether the code or the test is wrong, fixes it, and re-runs the *whole*
   suite, up to a bounded number of iterations. Never reaches green by disabling or weakening a
