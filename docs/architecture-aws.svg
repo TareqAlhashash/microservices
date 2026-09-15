@@ -153,7 +153,7 @@
   <text x="972" y="762" text-anchor="middle" font-size="11" fill="#687078">Kafka</text>
 
   <!-- Shared AWS services row (drawn before the labels below so their white backgrounds mask it cleanly) -->
-  <path d="M410,672 L649,672 L649,1160" stroke="#555555" stroke-width="1.3" fill="none"/>
+  <path d="M410,672 L649,672 L649,1108" stroke="#555555" stroke-width="1.3" fill="none"/>
   <path d="M881,672 L649,672" stroke="#555555" stroke-width="1.3" fill="none"/>
   <rect x="530" y="953" width="250" height="16" fill="#ffffff"/>
   <text x="655" y="965" text-anchor="middle" font-size="11" fill="#687078">app tier (both AZs) to shared regional services</text>
@@ -192,12 +192,15 @@
     <text x="1000" y="1222" text-anchor="middle" font-size="12" fill="#687078">logs &amp; metrics</text>
   </g>
 
-  <path d="M649,1160 L300,1160 L300,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
-  <text x="230" y="1116" font-size="11" fill="#687078">profile pictures</text>
+  <path d="M649,1108 L300,1108 L300,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <rect x="200" y="1090" width="100" height="14" fill="#ffffff"/>
+  <text x="250" y="1100" text-anchor="middle" font-size="11" fill="#687078">profile pictures</text>
 
-  <path d="M649,1160 L650,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
-  <text x="580" y="1116" font-size="11" fill="#687078">fetch secrets on startup</text>
+  <path d="M649,1108 L650,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <rect x="530" y="1090" width="150" height="14" fill="#ffffff"/>
+  <text x="605" y="1100" text-anchor="middle" font-size="11" fill="#687078">fetch secrets on startup</text>
 
-  <path d="M649,1160 L1000,1160 L1000,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
-  <text x="920" y="1116" font-size="11" fill="#687078">logs &amp; metrics</text>
+  <path d="M649,1108 L1000,1108 L1000,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <rect x="900" y="1090" width="100" height="14" fill="#ffffff"/>
+  <text x="950" y="1100" text-anchor="middle" font-size="11" fill="#687078">logs &amp; metrics</text>
 </svg>
