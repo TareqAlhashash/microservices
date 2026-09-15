@@ -91,10 +91,37 @@ every other service only consumes the single topic that triggers its own step.
 ### Target AWS deployment
 
 Nothing here runs on AWS today except S3 (and LocalStack for that in tests); everything else runs
-locally. This is what a production rollout would map onto, one AWS managed service per piece of
-local infrastructure this repo already depends on, not a redesign:
+locally. This is what a production rollout would map onto, across two Availability Zones, one AWS
+managed service per piece of local infrastructure this repo already depends on, not a redesign:
 
 ![Target AWS production architecture](docs/architecture-aws.svg)
+
+Why these specific choices, not the alternatives:
+
+- **ECS Fargate, not EKS/Kubernetes**: same reasoning ADR-001 already applies to Eureka/Zuul at
+  this scale, container orchestration overhead should match the system's actual complexity.
+  Fargate needs no cluster to patch or scale, and nothing here (no custom scheduler, no
+  multi-tenant workloads, no service mesh requirement) justifies Kubernetes' extra operational
+  surface. Nine stateless-ish services on Fargate tasks is a straightforward fit.
+- **One RDS PostgreSQL instance (Multi-AZ), not per-service instances**: matches what ADR-004
+  actually decided, table-level ownership on a shared instance, not instance-level isolation.
+  Multi-AZ adds automatic failover to a standby without multiplying instances the way genuine
+  per-service databases would; ADR-004's honest caveat (no DB-level permission boundary enforcing
+  the ownership convention) still applies here.
+- **Amazon MSK, not self-hosted Kafka**: removes broker patching, scaling, and KRaft-cluster
+  operations from the team, the same trade-off ADR-006 already names (Kafka is heavier than this
+  four-service flow strictly needs) without changing the underlying honesty of that decision;
+  AWS managing the brokers doesn't make Kafka itself any more necessary here.
+- **CloudFront + WAF in front of the ALB**: TLS termination and common-exploit filtering (SQLi,
+  XSS rulesets) at the edge, before traffic reaches the VPC at all. `api-gateway` is the one
+  externally-called service and the one carrying the raw password grant off the wire (see
+  ADR-002); this defends exactly that boundary.
+- **Two Availability Zones**: the minimum for "Multi-AZ" to mean anything real. ECS tasks, the
+  RDS standby, and the second MSK broker each need a second AZ to actually survive the first one
+  going down; anything calling itself highly available with only one AZ isn't.
+- **What this diagram doesn't claim**: no auto-scaling policy, no multi-region failover, no CI/CD
+  pipeline into any of this, it's the target infrastructure shape, not a complete production
+  runbook.
 
 ## Highlights
 

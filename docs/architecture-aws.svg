@@ -1,123 +1,203 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 820" font-family="Arial, Helvetica, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1300 1300" font-family="Arial, Helvetica, sans-serif">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#555555"/>
     </marker>
   </defs>
 
-  <rect x="0" y="0" width="1080" height="820" fill="#ffffff"/>
+  <rect x="0" y="0" width="1300" height="1300" fill="#ffffff"/>
 
-  <text x="540" y="32" text-anchor="middle" font-size="24" font-weight="700" fill="#16191f">InvestorBook - Target AWS Production Architecture</text>
-  <text x="540" y="54" text-anchor="middle" font-size="13" fill="#687078">Not deployed today; this is what a production rollout on AWS would look like (see docs/adr/ for the reasoning)</text>
+  <text x="650" y="32" text-anchor="middle" font-size="24" font-weight="700" fill="#16191f">InvestorBook - Target AWS Production Architecture</text>
+  <text x="650" y="54" text-anchor="middle" font-size="13" fill="#687078">Not deployed today; this is what a production rollout on AWS would look like (reasoning in the notes below)</text>
 
   <!-- Client -->
   <g>
-    <rect x="303" y="78" width="64" height="64" rx="10" fill="#57606f"/>
-    <circle cx="335" cy="100" r="8" fill="#ffffff"/>
-    <path d="M319,126 a16,14 0 0 1 32,0 z" fill="#ffffff"/>
-    <text x="335" y="158" text-anchor="middle" font-size="13" fill="#16191f">Member (browser/mobile)</text>
+    <rect x="618" y="78" width="64" height="64" rx="10" fill="#57606f"/>
+    <circle cx="650" cy="100" r="8" fill="#ffffff"/>
+    <path d="M634,126 a16,14 0 0 1 32,0 z" fill="#ffffff"/>
+    <text x="650" y="158" text-anchor="middle" font-size="13" fill="#16191f">Member (browser/mobile)</text>
+  </g>
+  <path d="M650,142 L650,193" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="662" y="172" font-size="11" fill="#687078">HTTPS</text>
+
+  <!-- CloudFront -->
+  <g>
+    <rect x="618" y="198" width="64" height="64" rx="10" fill="#8C4FFF"/>
+    <circle cx="650" cy="230" r="14" fill="none" stroke="#ffffff" stroke-width="2"/>
+    <ellipse cx="650" cy="230" rx="14" ry="6" fill="none" stroke="#ffffff" stroke-width="1.5"/>
+    <line x1="650" y1="216" x2="650" y2="244" stroke="#ffffff" stroke-width="1.5"/>
+    <text x="650" y="286" text-anchor="middle" font-size="13" fill="#16191f">CloudFront</text>
+    <text x="650" y="302" text-anchor="middle" font-size="12" fill="#687078">edge distribution</text>
   </g>
 
+  <!-- WAF -->
+  <g>
+    <rect x="820" y="198" width="64" height="64" rx="10" fill="#C7131F"/>
+    <path d="M852,212 l14,6 v14 c0,12 -8,18 -14,22 c-6,-4 -14,-10 -14,-22 v-14 z" fill="none" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M845,231 l5,6 l11,-13" stroke="#ffffff" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="852" y="286" text-anchor="middle" font-size="13" fill="#16191f">AWS WAF</text>
+    <text x="852" y="302" text-anchor="middle" font-size="12" fill="#687078">Web ACL</text>
+  </g>
+  <path d="M818,230 L684,230" stroke="#C7131F" stroke-width="1.5" stroke-dasharray="4,3" fill="none"/>
+  <text x="725" y="222" text-anchor="middle" font-size="11" fill="#C7131F">protects</text>
+
   <!-- AWS Cloud boundary -->
-  <rect x="40" y="160" width="1000" height="610" rx="6" fill="none" stroke="#879196" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <text x="58" y="182" font-size="13" fill="#687078">AWS Cloud (us-east-1)</text>
+  <rect x="60" y="330" width="1180" height="880" rx="6" fill="none" stroke="#879196" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="78" y="352" font-size="13" fill="#687078">AWS Cloud (us-east-1)</text>
 
   <!-- VPC boundary -->
-  <rect x="70" y="200" width="530" height="540" rx="6" fill="none" stroke="#8C4FFF" stroke-width="1.5" stroke-dasharray="6,4"/>
-  <text x="88" y="222" font-size="13" fill="#8C4FFF">VPC (10.0.0.0/16)</text>
+  <rect x="90" y="375" width="1120" height="750" rx="6" fill="none" stroke="#8C4FFF" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="108" y="397" font-size="13" fill="#8C4FFF">VPC (10.0.0.0/16)</text>
 
   <!-- Public subnet -->
-  <rect x="100" y="235" width="470" height="110" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="115" y="255" font-size="12" fill="#8C4FFF">Public subnet</text>
+  <rect x="120" y="412" width="1060" height="110" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="135" y="432" font-size="12" fill="#8C4FFF">Public subnet (2 AZs)</text>
 
-  <!-- Private subnet -->
-  <rect x="100" y="380" width="470" height="330" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="115" y="400" font-size="12" fill="#8C4FFF">Private subnet</text>
+  <path d="M650,262 L650,414" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="662" y="340" font-size="11" fill="#687078">HTTPS (origin)</text>
 
   <!-- ALB -->
   <g>
-    <rect x="303" y="258" width="64" height="64" rx="10" fill="#8C4FFF"/>
-    <circle cx="335" cy="274" r="4" fill="#ffffff"/>
-    <path d="M335,278 L320,296 M335,278 L350,296" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-    <circle cx="320" cy="300" r="4" fill="#ffffff"/>
-    <circle cx="350" cy="300" r="4" fill="#ffffff"/>
-    <text x="335" y="336" text-anchor="middle" font-size="13" fill="#16191f">Application Load Balancer</text>
+    <rect x="618" y="418" width="64" height="64" rx="10" fill="#8C4FFF"/>
+    <circle cx="650" cy="434" r="4" fill="#ffffff"/>
+    <path d="M650,438 L635,456 M650,438 L665,456" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <circle cx="635" cy="460" r="4" fill="#ffffff"/>
+    <circle cx="665" cy="460" r="4" fill="#ffffff"/>
+    <text x="650" y="498" text-anchor="middle" font-size="13" fill="#16191f">Application Load Balancer</text>
   </g>
 
-  <!-- ECS cluster -->
+  <!-- AZ boxes -->
+  <rect x="120" y="540" width="515" height="560" rx="6" fill="none" stroke="#687078" stroke-width="1.3" stroke-dasharray="5,4"/>
+  <text x="135" y="562" font-size="13" font-weight="600" fill="#414b52">Availability Zone A</text>
+
+  <rect x="665" y="540" width="515" height="560" rx="6" fill="none" stroke="#687078" stroke-width="1.3" stroke-dasharray="5,4"/>
+  <text x="680" y="562" font-size="13" font-weight="600" fill="#414b52">Availability Zone B</text>
+
+  <!-- Private subnets -->
+  <rect x="140" y="580" width="475" height="500" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="155" y="600" font-size="12" fill="#8C4FFF">Private subnet A</text>
+
+  <rect x="685" y="580" width="475" height="500" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="700" y="600" font-size="12" fill="#8C4FFF">Private subnet B</text>
+
+  <!-- ALB -> ECS -->
+  <path d="M650,482 L378,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M650,482 L913,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <rect x="565" y="493" width="170" height="16" fill="#ffffff"/>
+  <text x="650" y="505" text-anchor="middle" font-size="11" fill="#687078">forwards to api-gateway task</text>
+
+  <!-- ECS A -->
   <g>
-    <rect x="303" y="438" width="64" height="64" rx="10" fill="#ED7100"/>
-    <rect x="317" y="452" width="14" height="14" rx="2" fill="#ffffff"/>
-    <rect x="339" y="452" width="14" height="14" rx="2" fill="#ffffff"/>
-    <rect x="317" y="474" width="14" height="14" rx="2" fill="#ffffff"/>
-    <rect x="339" y="474" width="14" height="14" rx="2" fill="#ffffff"/>
-    <text x="335" y="516" text-anchor="middle" font-size="13" fill="#16191f">ECS Fargate cluster</text>
-    <text x="335" y="532" text-anchor="middle" font-size="12" fill="#687078">all 9 services as tasks</text>
+    <rect x="346" y="640" width="64" height="64" rx="10" fill="#ED7100"/>
+    <rect x="360" y="654" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="382" y="654" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="360" y="676" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="382" y="676" width="14" height="14" rx="2" fill="#ffffff"/>
+    <text x="378" y="722" text-anchor="middle" font-size="13" fill="#16191f">ECS Fargate tasks</text>
+    <text x="378" y="738" text-anchor="middle" font-size="12" fill="#687078">9 services, AZ-a</text>
   </g>
 
-  <!-- RDS -->
+  <!-- ECS B -->
   <g>
-    <rect x="168" y="578" width="64" height="64" rx="10" fill="#2E73B8"/>
-    <path d="M188,596 a12,5 0 1 0 24,0 a12,5 0 1 0 -24,0 M188,596 v20 a12,5 0 0 0 24,0 v-20" stroke="#ffffff" stroke-width="2.2" fill="none"/>
-    <text x="200" y="656" text-anchor="middle" font-size="13" fill="#16191f">RDS PostgreSQL</text>
-    <text x="200" y="672" text-anchor="middle" font-size="12" fill="#687078">Multi-AZ</text>
+    <rect x="881" y="640" width="64" height="64" rx="10" fill="#ED7100"/>
+    <rect x="895" y="654" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="917" y="654" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="895" y="676" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="917" y="676" width="14" height="14" rx="2" fill="#ffffff"/>
+    <text x="913" y="722" text-anchor="middle" font-size="13" fill="#16191f">ECS Fargate tasks</text>
+    <text x="913" y="738" text-anchor="middle" font-size="12" fill="#687078">9 services, AZ-b</text>
   </g>
 
-  <!-- MSK -->
+  <!-- RDS Primary -->
   <g>
-    <rect x="448" y="578" width="64" height="64" rx="10" fill="#1E8E8E"/>
-    <path d="M466,598 h28 M466,610 h20 M466,622 h28" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
-    <text x="480" y="656" text-anchor="middle" font-size="13" fill="#16191f">Amazon MSK</text>
-    <text x="480" y="672" text-anchor="middle" font-size="12" fill="#687078">Kafka broker</text>
+    <rect x="248" y="800" width="64" height="64" rx="10" fill="#2E73B8"/>
+    <path d="M268,818 a12,5 0 1 0 24,0 a12,5 0 1 0 -24,0 M268,818 v20 a12,5 0 0 0 24,0 v-20" stroke="#ffffff" stroke-width="2.2" fill="none"/>
+    <text x="280" y="878" text-anchor="middle" font-size="13" fill="#16191f">RDS PostgreSQL</text>
+    <text x="280" y="894" text-anchor="middle" font-size="12" fill="#687078">primary</text>
   </g>
+
+  <!-- MSK broker 1 -->
+  <g>
+    <rect x="444" y="800" width="64" height="64" rx="10" fill="#1E8E8E"/>
+    <path d="M462,820 h28 M462,832 h20 M462,844 h28" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <text x="476" y="878" text-anchor="middle" font-size="13" fill="#16191f">Amazon MSK</text>
+    <text x="476" y="894" text-anchor="middle" font-size="12" fill="#687078">broker 1</text>
+  </g>
+
+  <!-- RDS Standby -->
+  <g>
+    <rect x="783" y="800" width="64" height="64" rx="10" fill="#2E73B8" opacity="0.7"/>
+    <path d="M803,818 a12,5 0 1 0 24,0 a12,5 0 1 0 -24,0 M803,818 v20 a12,5 0 0 0 24,0 v-20" stroke="#ffffff" stroke-width="2.2" fill="none"/>
+    <text x="815" y="878" text-anchor="middle" font-size="13" fill="#16191f">RDS PostgreSQL</text>
+    <text x="815" y="894" text-anchor="middle" font-size="12" fill="#687078">standby (failover)</text>
+  </g>
+
+  <!-- MSK broker 2 -->
+  <g>
+    <rect x="979" y="800" width="64" height="64" rx="10" fill="#1E8E8E"/>
+    <path d="M997,820 h28 M997,832 h20 M997,844 h28" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <text x="1011" y="878" text-anchor="middle" font-size="13" fill="#16191f">Amazon MSK</text>
+    <text x="1011" y="894" text-anchor="middle" font-size="12" fill="#687078">broker 2</text>
+  </g>
+
+  <!-- ECS A -> RDS Primary / MSK 1 -->
+  <path d="M357,700 L295,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="290" y="765" font-size="11" fill="#687078">JDBC</text>
+  <path d="M401,700 L461,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="435" y="765" font-size="11" fill="#687078">Kafka</text>
+
+  <!-- ECS B -> RDS Standby / MSK 2 -->
+  <path d="M892,700 L830,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="790" y="765" font-size="11" fill="#687078">JDBC</text>
+  <path d="M936,700 L996,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="965" y="765" font-size="11" fill="#687078">Kafka</text>
+
+  <!-- Shared AWS services row (drawn before the labels below so their white backgrounds mask it cleanly) -->
+  <path d="M410,672 L649,672 L649,1160" stroke="#555555" stroke-width="1.3" fill="none"/>
+  <path d="M881,672 L649,672" stroke="#555555" stroke-width="1.3" fill="none"/>
+  <rect x="530" y="953" width="250" height="16" fill="#ffffff"/>
+  <text x="655" y="965" text-anchor="middle" font-size="11" fill="#687078">app tier (both AZs) to shared regional services</text>
+
+  <!-- RDS sync / MSK replication -->
+  <path d="M312,836 L783,836" stroke="#2E73B8" stroke-width="1.3" stroke-dasharray="5,4" fill="none"/>
+  <rect x="590" y="822" width="112" height="16" fill="#ffffff"/>
+  <text x="646" y="834" text-anchor="middle" font-size="11" fill="#2E73B8">Multi-AZ sync</text>
+
+  <path d="M508,858 L979,858" stroke="#1E8E8E" stroke-width="1.3" stroke-dasharray="5,4" fill="none"/>
+  <rect x="580" y="866" width="132" height="16" fill="#ffffff"/>
+  <text x="646" y="878" text-anchor="middle" font-size="11" fill="#1E8E8E">broker replication</text>
 
   <!-- S3 -->
   <g>
-    <rect x="788" y="248" width="64" height="64" rx="10" fill="#569A31"/>
-    <path d="M804,264 h28 l-4,32 h-20 z M804,264 q16,6 28,0" stroke="#ffffff" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
-    <text x="820" y="326" text-anchor="middle" font-size="13" fill="#16191f">S3</text>
-    <text x="820" y="342" text-anchor="middle" font-size="12" fill="#687078">profile pictures</text>
+    <rect x="268" y="1128" width="64" height="64" rx="10" fill="#569A31"/>
+    <path d="M284,1144 h28 l-4,32 h-20 z M284,1144 q16,6 28,0" stroke="#ffffff" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+    <text x="300" y="1206" text-anchor="middle" font-size="13" fill="#16191f">S3</text>
+    <text x="300" y="1222" text-anchor="middle" font-size="12" fill="#687078">profile pictures</text>
   </g>
 
   <!-- Secrets Manager -->
   <g>
-    <rect x="788" y="408" width="64" height="64" rx="10" fill="#C7131F"/>
-    <rect x="810" y="432" width="20" height="16" rx="2" fill="#ffffff"/>
-    <path d="M814,432 v-6 a6,6 0 0 1 12,0 v6" stroke="#ffffff" stroke-width="2.2" fill="none"/>
-    <text x="820" y="488" text-anchor="middle" font-size="13" fill="#16191f">Secrets Manager</text>
-    <text x="820" y="504" text-anchor="middle" font-size="12" fill="#687078">JWT keys, DB creds</text>
+    <rect x="618" y="1128" width="64" height="64" rx="10" fill="#C7131F"/>
+    <rect x="640" y="1152" width="20" height="16" rx="2" fill="#ffffff"/>
+    <path d="M644,1152 v-6 a6,6 0 0 1 12,0 v6" stroke="#ffffff" stroke-width="2.2" fill="none"/>
+    <text x="650" y="1206" text-anchor="middle" font-size="13" fill="#16191f">Secrets Manager</text>
+    <text x="650" y="1222" text-anchor="middle" font-size="12" fill="#687078">JWT keys, DB creds</text>
   </g>
 
   <!-- CloudWatch -->
   <g>
-    <rect x="788" y="568" width="64" height="64" rx="10" fill="#CD2670"/>
-    <path d="M806,624 l10,-24 l8,12 l12,-20" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-    <text x="820" y="648" text-anchor="middle" font-size="13" fill="#16191f">CloudWatch</text>
-    <text x="820" y="664" text-anchor="middle" font-size="12" fill="#687078">logs &amp; metrics</text>
+    <rect x="968" y="1128" width="64" height="64" rx="10" fill="#CD2670"/>
+    <path d="M986,1184 l10,-24 l8,12 l12,-20" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1000" y="1206" text-anchor="middle" font-size="13" fill="#16191f">CloudWatch</text>
+    <text x="1000" y="1222" text-anchor="middle" font-size="12" fill="#687078">logs &amp; metrics</text>
   </g>
 
-  <!-- Arrows -->
-  <path d="M335,142 L335,254" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="345" y="200" font-size="11" fill="#687078">HTTPS</text>
+  <path d="M649,1160 L300,1160 L300,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <text x="230" y="1116" font-size="11" fill="#687078">profile pictures</text>
 
-  <path d="M335,322 L335,434" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="345" y="380" font-size="11" fill="#687078">forwards to api-gateway task</text>
+  <path d="M649,1160 L650,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <text x="580" y="1116" font-size="11" fill="#687078">fetch secrets on startup</text>
 
-  <path d="M312,498 L215,574" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="225" y="548" font-size="11" fill="#687078">JDBC</text>
-
-  <path d="M358,498 L465,574" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="405" y="548" font-size="11" fill="#687078">Kafka protocol</text>
-
-  <path d="M367,455 L610,455 L610,280 L784,280" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="612" y="270" font-size="11" fill="#687078">profile picture upload/download</text>
-
-  <path d="M367,470 L784,470" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="600" y="463" font-size="11" fill="#687078">fetch secrets on startup</text>
-
-  <path d="M367,485 L610,485 L610,640 L784,640" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="612" y="630" font-size="11" fill="#687078">structured logs, Actuator metrics</text>
-
-  <!-- Footnote -->
-  <text x="60" y="800" font-size="12" fill="#687078">Maps 1:1 onto what's already built (nine ECS tasks, one RDS instance, one MSK cluster), not a redesign - see README.md for the as-built C4 diagrams.</text>
+  <path d="M649,1160 L1000,1160 L1000,1124" stroke="#555555" stroke-width="1.3" fill="none" marker-end="url(#arrow)"/>
+  <text x="920" y="1116" font-size="11" fill="#687078">logs &amp; metrics</text>
 </svg>
