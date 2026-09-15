@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 820" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#555555"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1080" height="820" fill="#ffffff"/>
+
+  <text x="540" y="32" text-anchor="middle" font-size="24" font-weight="700" fill="#16191f">InvestorBook - Target AWS Production Architecture</text>
+  <text x="540" y="54" text-anchor="middle" font-size="13" fill="#687078">Not deployed today; this is what a production rollout on AWS would look like (see docs/adr/ for the reasoning)</text>
+
+  <!-- Client -->
+  <g>
+    <rect x="303" y="78" width="64" height="64" rx="10" fill="#57606f"/>
+    <circle cx="335" cy="100" r="8" fill="#ffffff"/>
+    <path d="M319,126 a16,14 0 0 1 32,0 z" fill="#ffffff"/>
+    <text x="335" y="158" text-anchor="middle" font-size="13" fill="#16191f">Member (browser/mobile)</text>
+  </g>
+
+  <!-- AWS Cloud boundary -->
+  <rect x="40" y="160" width="1000" height="610" rx="6" fill="none" stroke="#879196" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="58" y="182" font-size="13" fill="#687078">AWS Cloud (us-east-1)</text>
+
+  <!-- VPC boundary -->
+  <rect x="70" y="200" width="530" height="540" rx="6" fill="none" stroke="#8C4FFF" stroke-width="1.5" stroke-dasharray="6,4"/>
+  <text x="88" y="222" font-size="13" fill="#8C4FFF">VPC (10.0.0.0/16)</text>
+
+  <!-- Public subnet -->
+  <rect x="100" y="235" width="470" height="110" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="115" y="255" font-size="12" fill="#8C4FFF">Public subnet</text>
+
+  <!-- Private subnet -->
+  <rect x="100" y="380" width="470" height="330" rx="6" fill="#F5F0FF" stroke="#8C4FFF" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="115" y="400" font-size="12" fill="#8C4FFF">Private subnet</text>
+
+  <!-- ALB -->
+  <g>
+    <rect x="303" y="258" width="64" height="64" rx="10" fill="#8C4FFF"/>
+    <circle cx="335" cy="274" r="4" fill="#ffffff"/>
+    <path d="M335,278 L320,296 M335,278 L350,296" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    <circle cx="320" cy="300" r="4" fill="#ffffff"/>
+    <circle cx="350" cy="300" r="4" fill="#ffffff"/>
+    <text x="335" y="336" text-anchor="middle" font-size="13" fill="#16191f">Application Load Balancer</text>
+  </g>
+
+  <!-- ECS cluster -->
+  <g>
+    <rect x="303" y="438" width="64" height="64" rx="10" fill="#ED7100"/>
+    <rect x="317" y="452" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="339" y="452" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="317" y="474" width="14" height="14" rx="2" fill="#ffffff"/>
+    <rect x="339" y="474" width="14" height="14" rx="2" fill="#ffffff"/>
+    <text x="335" y="516" text-anchor="middle" font-size="13" fill="#16191f">ECS Fargate cluster</text>
+    <text x="335" y="532" text-anchor="middle" font-size="12" fill="#687078">all 9 services as tasks</text>
+  </g>
+
+  <!-- RDS -->
+  <g>
+    <rect x="168" y="578" width="64" height="64" rx="10" fill="#2E73B8"/>
+    <path d="M188,596 a12,5 0 1 0 24,0 a12,5 0 1 0 -24,0 M188,596 v20 a12,5 0 0 0 24,0 v-20" stroke="#ffffff" stroke-width="2.2" fill="none"/>
+    <text x="200" y="656" text-anchor="middle" font-size="13" fill="#16191f">RDS PostgreSQL</text>
+    <text x="200" y="672" text-anchor="middle" font-size="12" fill="#687078">Multi-AZ</text>
+  </g>
+
+  <!-- MSK -->
+  <g>
+    <rect x="448" y="578" width="64" height="64" rx="10" fill="#1E8E8E"/>
+    <path d="M466,598 h28 M466,610 h20 M466,622 h28" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+    <text x="480" y="656" text-anchor="middle" font-size="13" fill="#16191f">Amazon MSK</text>
+    <text x="480" y="672" text-anchor="middle" font-size="12" fill="#687078">Kafka broker</text>
+  </g>
+
+  <!-- S3 -->
+  <g>
+    <rect x="788" y="248" width="64" height="64" rx="10" fill="#569A31"/>
+    <path d="M804,264 h28 l-4,32 h-20 z M804,264 q16,6 28,0" stroke="#ffffff" stroke-width="2.2" fill="none" stroke-linejoin="round"/>
+    <text x="820" y="326" text-anchor="middle" font-size="13" fill="#16191f">S3</text>
+    <text x="820" y="342" text-anchor="middle" font-size="12" fill="#687078">profile pictures</text>
+  </g>
+
+  <!-- Secrets Manager -->
+  <g>
+    <rect x="788" y="408" width="64" height="64" rx="10" fill="#C7131F"/>
+    <rect x="810" y="432" width="20" height="16" rx="2" fill="#ffffff"/>
+    <path d="M814,432 v-6 a6,6 0 0 1 12,0 v6" stroke="#ffffff" stroke-width="2.2" fill="none"/>
+    <text x="820" y="488" text-anchor="middle" font-size="13" fill="#16191f">Secrets Manager</text>
+    <text x="820" y="504" text-anchor="middle" font-size="12" fill="#687078">JWT keys, DB creds</text>
+  </g>
+
+  <!-- CloudWatch -->
+  <g>
+    <rect x="788" y="568" width="64" height="64" rx="10" fill="#CD2670"/>
+    <path d="M806,624 l10,-24 l8,12 l12,-20" stroke="#ffffff" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="820" y="648" text-anchor="middle" font-size="13" fill="#16191f">CloudWatch</text>
+    <text x="820" y="664" text-anchor="middle" font-size="12" fill="#687078">logs &amp; metrics</text>
+  </g>
+
+  <!-- Arrows -->
+  <path d="M335,142 L335,254" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="345" y="200" font-size="11" fill="#687078">HTTPS</text>
+
+  <path d="M335,322 L335,434" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="345" y="380" font-size="11" fill="#687078">forwards to api-gateway task</text>
+
+  <path d="M312,498 L215,574" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="225" y="548" font-size="11" fill="#687078">JDBC</text>
+
+  <path d="M358,498 L465,574" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="405" y="548" font-size="11" fill="#687078">Kafka protocol</text>
+
+  <path d="M367,455 L610,455 L610,280 L784,280" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="612" y="270" font-size="11" fill="#687078">profile picture upload/download</text>
+
+  <path d="M367,470 L784,470" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="600" y="463" font-size="11" fill="#687078">fetch secrets on startup</text>
+
+  <path d="M367,485 L610,485 L610,640 L784,640" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="612" y="630" font-size="11" fill="#687078">structured logs, Actuator metrics</text>
+
+  <!-- Footnote -->
+  <text x="60" y="800" font-size="12" fill="#687078">Maps 1:1 onto what's already built (nine ECS tasks, one RDS instance, one MSK cluster), not a redesign - see README.md for the as-built C4 diagrams.</text>
+</svg>

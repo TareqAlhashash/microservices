@@ -88,6 +88,14 @@ graph LR
 `order-service` is the only consumer of four different topics (it tracks overall order status);
 every other service only consumes the single topic that triggers its own step.
 
+### Target AWS deployment
+
+Nothing here runs on AWS today except S3 (and LocalStack for that in tests); everything else runs
+locally. This is what a production rollout would map onto, one AWS managed service per piece of
+local infrastructure this repo already depends on, not a redesign:
+
+![Target AWS production architecture](docs/architecture-aws.svg)
+
 ## Highlights
 
 - **A real bug only an integration test could catch**: signup crashed on any member with an
