@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+</FindBugsFilter>

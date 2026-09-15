@@ -8,6 +8,8 @@ import java.util.Date;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.amazonaws.services.s3.AmazonS3;
@@ -19,6 +21,8 @@ import com.amazonaws.services.s3.model.PutObjectRequest;
  * it can be pointed at a real bucket or, in tests, at a LocalStack endpoint.
  */
 public class ProfilePictureStorage {
+
+	private static final Logger logger = LoggerFactory.getLogger(ProfilePictureStorage.class);
 
 	private static final long DEFAULT_EXPIRY_SECONDS = 5 * 60;
 
@@ -48,7 +52,9 @@ public class ProfilePictureStorage {
 			file.transferTo(tempFile);
 			s3Client.putObject(new PutObjectRequest(bucket, key, tempFile));
 		} finally {
-			tempFile.delete();
+			if (!tempFile.delete()) {
+				logger.warn("could not delete temp upload file {}", tempFile.getAbsolutePath());
+			}
 		}
 		return key;
 	}

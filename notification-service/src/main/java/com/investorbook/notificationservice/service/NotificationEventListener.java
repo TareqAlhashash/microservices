@@ -37,7 +37,7 @@ public class NotificationEventListener {
 	@Transactional
 	public void onInvoiceIssued(InvoiceIssued event) {
 		if (alreadyProcessed(event.getEventId())) {
-			logger.info("ignoring redelivered InvoiceIssued event {}", event.getEventId());
+			logger.info("ignoring redelivered InvoiceIssued event {}", sanitizeForLog(event.getEventId()));
 			return;
 		}
 
@@ -48,7 +48,8 @@ public class NotificationEventListener {
 		try {
 			emailSender.sendCompletionEmail(event);
 		} catch (Exception e) {
-			logger.warn("failed to send completion email for order {}: {}", event.getOrderId(), e.toString());
+			logger.warn("failed to send completion email for order {}: {}", sanitizeForLog(event.getOrderId()),
+					sanitizeForLog(e.toString()));
 		}
 
 		kafkaTemplate.send(Topics.ORDER_COMPLETED, event.getOrderId(),
@@ -64,5 +65,11 @@ public class NotificationEventListener {
 		} catch (DataIntegrityViolationException e) {
 			return true;
 		}
+	}
+
+	// Strips CR/LF so a Kafka message's event id (attacker-controllable if a producer
+	// were ever compromised) can't forge extra log lines or corrupt log-file structure.
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 }

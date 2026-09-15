@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+
+    <!--
+    SPRING_CSRF_PROTECTION_DISABLED: deliberate, not an oversight - see
+    auth-service/spotbugs-exclude.xml for the fuller rationale. This is also a stateless,
+    bearer-token API (SessionCreationPolicy.STATELESS); the OAuth2 client secret is sent via
+    HTTP Basic auth from a non-browser flow (LoginService), not a cookie/session a forged
+    cross-site request could ride along on.
+    -->
+    <Match>
+        <Class name="com.investorbook.apigateway.security.SecurityConfiguration" />
+        <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED" />
+    </Match>
+
+    <!--
+    EI_EXPOSE_REP2: JwtAuthenticationConfig is a plain @Value-populated Spring config bean -
+    populated once at startup and never mutated afterward in this app's actual usage, despite
+    exposing public setters (needed for Spring's property binding). Defensively copying a
+    config bean into every consumer would be pure ceremony here, not a real safeguard.
+    -->
+    <Match>
+        <Class name="com.investorbook.apigateway.service.LoginService" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+</FindBugsFilter>

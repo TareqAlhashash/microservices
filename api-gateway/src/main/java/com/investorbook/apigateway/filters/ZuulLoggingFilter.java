@@ -23,8 +23,14 @@ public class ZuulLoggingFilter extends ZuulFilter {
 	@Override
 	public Object run() throws ZuulException {
 		HttpServletRequest request = RequestContext.getCurrentContext().getRequest();
-		logger.info("request -> {} request URL -> {}", request, request.getRequestURI());
+		logger.info("request URL -> {}", sanitizeForLog(request.getRequestURI()));
 		return null;
+	}
+
+	// Strips CR/LF so a caller-controlled URI can't forge extra log lines or
+	// corrupt log-file structure (CRLF/log injection).
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 
 	@Override

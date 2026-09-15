@@ -1,6 +1,8 @@
 package com.investorbook.common.util;
 
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.security.spec.InvalidKeySpecException;
 import java.util.Base64;
 
 import javax.crypto.SecretKeyFactory;
@@ -68,8 +70,8 @@ public final class EncryptionUtil {
 
 			return saltWithHashed;
 
-		} catch (Exception e) {
-			throw new RuntimeException(e);
+		} catch (NoSuchAlgorithmException | InvalidKeySpecException e) {
+			throw new IllegalStateException("PBKDF2WithHmacSHA512 unavailable", e);
 		}
 	}
 

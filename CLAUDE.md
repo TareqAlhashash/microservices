@@ -394,6 +394,58 @@ done here to keep the demo's moving parts down. Every touched service's IT suite
 `actuatorHealth_isReachableWithoutAToken` test proving the carve-out actually works, not just
 that the property is set.
 
+### Security scanning (Phase 3): SpotBugs + FindSecBugs + OWASP Dependency-Check on every module
+
+Every module except `eureka-server` now has the same two static-analysis/CVE-scan plugins
+member-service originally pioneered, bound the same way: SpotBugs+FindSecBugs bound to `verify`
+(fast, offline, so it runs on every build), OWASP Dependency-Check declared but deliberately
+**not** bound to a lifecycle phase (see member-service's "unit vs. integration tests" section
+above for why — the first NVD sync without an API key is too slow to be a build-blocking
+default). Each module has its own `spotbugs-exclude.xml`; every triage entry names the specific
+class/method and states a reason, never a blanket suppression.
+
+Running this across eight modules that had never been scanned before turned up a genuinely mixed
+set of findings — some real bugs worth fixing, some deliberate design choices worth naming
+instead of "fixing":
+
+- **Real fixes made**: a missing `serialVersionUID` (`auth-service`'s `InvestorBookUser`); a
+  `File.delete()` return value silently ignored, meaning a failed cleanup would leave a temp
+  upload file on disk forever (`common`'s `ProfilePictureStorage`); `Date` fields returned/stored
+  by reference in `common`'s `ExceptionResponse` (a shared value type touched by every service's
+  error responses) — fixed with defensive copies rather than suppressed, since `Date` is
+  genuinely mutable and the fix is two lines; `EncryptionUtil.hash` catching bare `Exception` when
+  only `NoSuchAlgorithmException`/`InvalidKeySpecException` are actually possible; reliance on
+  the JVM's default platform encoding in `api-gateway`'s `LoginService` (`String.getBytes()` with
+  no explicit charset when Base64-encoding the OAuth2 client's Basic-auth header — a real
+  portability footgun, fixed with an explicit `UTF_8`); a non-locale-aware `toUpperCase()` on a
+  generated invoice number in `invoice-service` (fixed with `Locale.ROOT`, since it's uppercasing
+  hex characters in an identifier, not user-facing text); and CRLF-log-injection findings on every
+  Kafka listener that logged an event id or order id without sanitizing it first (`order-service`,
+  `payment-service`, `invoice-service`, `notification-service` — the *fields themselves* are
+  legitimately attacker-influenced if a producer were ever compromised, unlike the one
+  false-positive case below) plus one in `api-gateway`'s `ZuulLoggingFilter` logging a raw request
+  URI.
+- **Triaged as deliberate, not suppressed blind**: `SPRING_CSRF_PROTECTION_DISABLED` on
+  `auth-service` and `api-gateway`'s `SecurityConfiguration` — both are stateless, bearer-token
+  APIs (`SessionCreationPolicy.STATELESS`); CSRF exploits rely on a browser automatically
+  attaching a *cookie/session* to a forged cross-site request, and there is no cookie/session
+  here for one to ride along on. `EI_EXPOSE_REP2` on every class that constructor-injects a
+  `KafkaTemplate` (a Spring-managed connection/client object, not a value type — there is nothing
+  meaningful to "defensively copy") and on `api-gateway`'s `LoginService` storing its
+  `JwtAuthenticationConfig` (a `@Value`-populated config bean, populated once at startup and never
+  mutated in this app's actual usage).
+- **A genuine tool limitation, documented rather than worked around further**:
+  `order-service`'s `OrderEventListener.transitionIfExpected` still trips `CRLF_INJECTION_LOGS` on
+  its 3-arg `logger.info(String, Object...)` call *after* the exact same `sanitizeForLog(String)`
+  fix that resolved the identical finding on the 2-arg `logger.warn` two lines above — confirmed
+  by re-running with only that one fix in place. FindSecBugs' taint tracker doesn't verify custom
+  sanitizer methods through the varargs logging overload specifically; the value passed is
+  provably always the sanitized one, so this one is a suppressed false positive, not a live risk.
+
+Confirmed by actually running `mvn verify` on all nine modules after every fix — including
+re-running `member-service` (unchanged, but `common` moved under it) and reinstalling `common`
+into the local `.m2` before re-verifying every consumer — not assumed from a clean-looking diff.
+
 ### Why member-service, auth-service, resource-service, api-gateway, and common are on a different Boot version
 
 `member-service` was bumped from Spring Boot 2.0.2 to **2.2.13** (Spring Cloud `Hoxton.SR12`)

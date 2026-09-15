@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    CustomizedResponseEntityExceptionHandler is a @RestController in every service that
+    @Import's or extends it.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+
+    <!--
+    CRLF_INJECTION_LOGS: false positive here specifically. The logged value is
+    tempFile.getAbsolutePath() from a java.nio.file.Files.createTempFile("profile-pic-",
+    ".upload") call - a server-generated path (fixed prefix/suffix, a random middle segment),
+    never built from file.getOriginalFilename() or any other request-controlled input. There is
+    nothing in this string for a caller to inject.
+    -->
+    <Match>
+        <Class name="com.investorbook.common.aws.ProfilePictureStorage" />
+        <Bug pattern="CRLF_INJECTION_LOGS" />
+    </Match>
+</FindBugsFilter>

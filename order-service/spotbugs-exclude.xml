@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+
+    <!--
+    EI_EXPOSE_REP2: KafkaTemplate is a Spring-managed singleton collaborator (a connection/
+    client object, not a value type) - the same category of finding already triaged for
+    config beans elsewhere (see api-gateway/spotbugs-exclude.xml). There is nothing to
+    "defensively copy" for a client object, and constructor injection storing it by reference
+    is the whole point of dependency injection.
+    -->
+    <Match>
+        <Class name="com.investorbook.orderservice.service.OrderEventPublisher" />
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+
+    <!--
+    CRLF_INJECTION_LOGS on OrderEventListener.transitionIfExpected's 3-arg logger.info call:
+    orderId IS sanitized here (same sanitizeForLog(String) pattern used throughout this repo,
+    e.g. MemberServiceController) - confirmed by this exact finding disappearing from the
+    2-arg logger.warn call two lines above once the same fix was applied there. FindSecBugs'
+    taint tracker does not verify custom sanitizer methods through the Object... varargs
+    logging overload specifically; it still flags the call after the real fix. Not a
+    genuine CRLF injection - the value passed is always the sanitized one.
+    -->
+    <Match>
+        <Class name="com.investorbook.orderservice.service.OrderEventListener" />
+        <Method name="transitionIfExpected" />
+        <Bug pattern="CRLF_INJECTION_LOGS" />
+    </Match>
+</FindBugsFilter>

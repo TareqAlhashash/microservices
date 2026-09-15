@@ -10,13 +10,13 @@ public class ExceptionResponse {
 
 	public ExceptionResponse(Date timestamp, String message, String details) {
 		super();
-		this.timestamp = timestamp;
+		this.timestamp = timestamp == null ? null : new Date(timestamp.getTime());
 		this.message = message;
 		this.details = details;
 	}
 
 	public Date getTimestamp() {
-		return timestamp;
+		return timestamp == null ? null : new Date(timestamp.getTime());
 	}
 
 	public String getMessage() {

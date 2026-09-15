@@ -1,5 +1,6 @@
 package com.investorbook.apigateway.service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import javax.validation.Valid;
@@ -35,8 +36,8 @@ public class LoginService {
 	@PostMapping(path = "/login", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
 	public ResponseEntity<AuthResponse> login(@Valid AuthRequest authRequest) {
 		authRequest.setGrantType("password");
-		String encodedAuth = Base64.getEncoder()
-				.encodeToString((config.getHtml5ClientId() + ":" + config.getHtml5ClientSecret()).getBytes());
+		String encodedAuth = Base64.getEncoder().encodeToString(
+				(config.getHtml5ClientId() + ":" + config.getHtml5ClientSecret()).getBytes(StandardCharsets.UTF_8));
 		return ResponseEntity.ok(oauthServiceProxy.login("Basic " + encodedAuth, authRequest.toFormParams()));
 	}
 }

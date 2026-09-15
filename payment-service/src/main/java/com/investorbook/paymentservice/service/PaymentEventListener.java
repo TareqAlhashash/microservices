@@ -45,7 +45,7 @@ public class PaymentEventListener {
 	@Transactional
 	public void onOrderPlaced(OrderPlaced event) {
 		if (alreadyProcessed(event.getEventId())) {
-			logger.info("ignoring redelivered OrderPlaced event {}", event.getEventId());
+			logger.info("ignoring redelivered OrderPlaced event {}", sanitizeForLog(event.getEventId()));
 			return;
 		}
 
@@ -74,5 +74,11 @@ public class PaymentEventListener {
 		} catch (DataIntegrityViolationException e) {
 			return true;
 		}
+	}
+
+	// Strips CR/LF so a Kafka message's event id (attacker-controllable if a producer
+	// were ever compromised) can't forge extra log lines or corrupt log-file structure.
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 }

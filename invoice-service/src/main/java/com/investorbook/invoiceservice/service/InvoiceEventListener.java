@@ -1,6 +1,7 @@
 package com.investorbook.invoiceservice.service;
 
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 import org.slf4j.Logger;
@@ -39,11 +40,13 @@ public class InvoiceEventListener {
 	@Transactional
 	public void onPaymentSucceeded(PaymentSucceeded event) {
 		if (alreadyProcessed(event.getEventId())) {
-			logger.info("ignoring redelivered PaymentSucceeded event {}", event.getEventId());
+			logger.info("ignoring redelivered PaymentSucceeded event {}", sanitizeForLog(event.getEventId()));
 			return;
 		}
 
-		String invoiceNumber = "INV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+		// Locale.ROOT: uppercasing hex characters in a generated identifier, not
+		// user-facing text - locale-independent on purpose.
+		String invoiceNumber = "INV-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase(Locale.ROOT);
 		Instant issuedAt = Instant.now();
 		invoiceRepository.save(new Invoice(UUID.randomUUID().toString(), event.getOrderId(), invoiceNumber,
 				event.getAmount(), issuedAt));
@@ -60,5 +63,11 @@ public class InvoiceEventListener {
 		} catch (DataIntegrityViolationException e) {
 			return true;
 		}
+	}
+
+	// Strips CR/LF so a Kafka message's event id (attacker-controllable if a producer
+	// were ever compromised) can't forge extra log lines or corrupt log-file structure.
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 }

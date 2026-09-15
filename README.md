@@ -191,11 +191,22 @@ Testcontainers gotcha — `KafkaContainer` defaults to embedded-Zookeeper mode a
   GreenMail integration test (`notification-service`). `mvn verify` is green on all nine.
 - **Not tested**: `eureka-server` only — it's the naming server with no custom logic of its own,
   so there's nothing here to write a meaningful test against.
-- **Security scan**: SpotBugs/FindSecBugs is wired into every tested module's `mvn verify` and
-  clean. OWASP Dependency-Check is declared but has never actually completed a run in this
-  environment — without an NVD API key, its first sync ran for the better part of half an hour,
-  started hitting rate-limit retries, and was still under 15% through the feed when I stopped it.
-  It's a documented follow-up (run it with `NVD_API_KEY` set, or from CI), not a finished result.
+- **Security scan**: SpotBugs/FindSecBugs is wired into every module's `mvn verify` and clean —
+  member-service had it from the start; wiring it into the other eight in one pass turned up a
+  real, if small, batch of genuine bugs (a mutable `Date` returned by reference from the shared
+  error-response DTO every service uses, `String.getBytes()` relying on the JVM's default
+  platform encoding to Base64-encode an OAuth2 client secret, a silently-ignored `File.delete()`
+  failure, a couple of CRLF-log-injection gaps on values that genuinely originate from Kafka
+  message payloads) alongside a few deliberate design choices (CSRF disabled on stateless
+  bearer-token APIs, `KafkaTemplate` stored by reference) that got documented with a reason
+  instead of "fixed" into something worse. See `CLAUDE.md`'s "Security scanning" section for the
+  full list, including the one genuine FindSecBugs tool limitation found along the way (it
+  doesn't verify a custom sanitizer method through a varargs logging overload — confirmed by
+  re-running with only that one fix in place before concluding it wasn't a real gap). OWASP
+  Dependency-Check is declared but has never actually completed a run in this environment —
+  without an NVD API key, its first sync ran for the better part of half an hour, started hitting
+  rate-limit retries, and was still under 15% through the feed when I stopped it. It's a
+  documented follow-up (run it with `NVD_API_KEY` set, or from CI), not a finished result.
 - **No CI yet.** Nothing here has run anywhere but this machine.
 - **Demo-scale, not production-scale, on purpose**: one Postgres instance shared by every service
   that needs one (no per-service database isolation), a single hardcoded demo RSA keypair

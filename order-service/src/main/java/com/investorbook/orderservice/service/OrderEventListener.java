@@ -64,16 +64,22 @@ public class OrderEventListener {
 	private void transitionIfExpected(String orderId, OrderStatus expectedCurrent, OrderStatus next) {
 		OrderEntity order = orderRepository.findById(orderId).orElse(null);
 		if (order == null) {
-			logger.warn("received an event for unknown order {}", orderId);
+			logger.warn("received an event for unknown order {}", sanitizeForLog(orderId));
 			return;
 		}
 		if (order.getStatus() != expectedCurrent) {
-			logger.info("ignoring duplicate/out-of-order transition for order {}: expected {} but was {}", orderId,
-					expectedCurrent, order.getStatus());
+			logger.info("ignoring duplicate/out-of-order transition for order {}: expected {} but was {}",
+					sanitizeForLog(orderId), expectedCurrent, order.getStatus());
 			return;
 		}
 		order.setStatus(next);
 		order.setUpdatedAt(Instant.now());
 		orderRepository.save(order);
+	}
+
+	// Strips CR/LF so a Kafka message's order id (attacker-controllable if a producer
+	// were ever compromised) can't forge extra log lines or corrupt log-file structure.
+	private static String sanitizeForLog(String value) {
+		return value == null ? null : value.replaceAll("[\r\n]", "_");
 	}
 }

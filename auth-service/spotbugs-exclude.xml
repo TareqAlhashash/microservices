@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter>
+    <!--
+    SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
+    (@RestController / a Feign client interface Spring proxies as one), not a report of a
+    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    -->
+    <Match>
+        <Bug pattern="SPRING_ENDPOINT" />
+    </Match>
+
+    <!--
+    SPRING_CSRF_PROTECTION_DISABLED: deliberate, not an oversight. This service is a stateless,
+    bearer-token OAuth2 authorization server (SessionCreationPolicy.STATELESS, no cookies, no
+    browser session) - CSRF exploits work by having a victim's browser automatically attach their
+    session cookie to a forged cross-site request, which has nothing to forge here since there is
+    no session and a bearer token in an Authorization header is never attached automatically by
+    the browser the way a cookie is. Enabling CSRF protection here would only break legitimate
+    non-browser API clients for no real security benefit.
+    -->
+    <Match>
+        <Class name="com.investorbook.authservice.security.SecurityConfiguration" />
+        <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED" />
+    </Match>
+</FindBugsFilter>
