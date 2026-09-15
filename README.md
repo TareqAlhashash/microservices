@@ -118,7 +118,7 @@ graph LR
   real Postgres/S3/Kafka integration tests via Testcontainers/LocalStack, full HTTP+security
   end-to-end tests. `mvn verify` is clean, including SpotBugs/FindSecBugs, on all nine.
 - **Not done**: OWASP Dependency-Check has never completed a run here (no NVD API key, so the first
-  sync is too slow); no CI; no C4/ADRs beyond what's in this repo now.
+  sync is too slow); no CI.
 - **Demo-scale on purpose**: one shared Postgres instance (see [ADR-004](docs/adr/004-per-service-data-ownership.md)),
   one checked-in demo RSA keypair (env-overridable), mocked payment and email. See the ADRs for
   what a production version of each would do differently.
