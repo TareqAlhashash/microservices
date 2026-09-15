@@ -29,7 +29,6 @@ import com.investorbook.memberservice.dto.Member;
 import com.investorbook.memberservice.exception.MemberAlreadyExistsException;
 import com.investorbook.memberservice.exception.MemberNotFoundException;
 import com.investorbook.memberservice.exception.MemberUploadPicException;
-import com.investorbook.memberservice.proxy.AuthenticationServiceProxy;
 
 @RestController
 public class MemberServiceController {
@@ -37,15 +36,15 @@ public class MemberServiceController {
 	private static final Logger logger = LoggerFactory.getLogger(MemberServiceController.class);
 
 	private final MemberRepository memberRepository;
-	private final AuthenticationServiceProxy authenticationServiceProxy;
+	private final AuthenticationServiceClient authenticationServiceClient;
 	private final ProfilePictureStorage profilePictureStorage;
 	private final PasswordEncoder passwordEncoder;
 
 	public MemberServiceController(MemberRepository memberRepository,
-			AuthenticationServiceProxy authenticationServiceProxy, ProfilePictureStorage profilePictureStorage,
+			AuthenticationServiceClient authenticationServiceClient, ProfilePictureStorage profilePictureStorage,
 			PasswordEncoder passwordEncoder) {
 		this.memberRepository = memberRepository;
-		this.authenticationServiceProxy = authenticationServiceProxy;
+		this.authenticationServiceClient = authenticationServiceClient;
 		this.profilePictureStorage = profilePictureStorage;
 		this.passwordEncoder = passwordEncoder;
 	}
@@ -75,8 +74,7 @@ public class MemberServiceController {
 		memberRepository.save(member);
 
 		// login and create a token and send it back
-		return authenticationServiceProxy
-				.login(new AuthRequest(memberDto.getEmail(), memberDto.getPassword()).toFormParams());
+		return authenticationServiceClient.login(new AuthRequest(memberDto.getEmail(), memberDto.getPassword()));
 
 		// TODO call email service to send welcome message and a verify link,this can be
 		// implemented using messaging to create the email asynchronously

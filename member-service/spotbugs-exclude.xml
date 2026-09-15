@@ -28,4 +28,16 @@
     <Match>
         <Bug pattern="SPRING_ENDPOINT" />
     </Match>
+
+    <!--
+    UPM_UNCALLED_PRIVATE_METHOD: AuthenticationServiceClient.loginFallback is resilience4j's
+    @CircuitBreaker fallbackMethod, invoked reflectively by name (the string in the annotation)
+    by the woven AOP proxy - there is genuinely no static call site for SpotBugs to find, but
+    it is called, and AuthenticationServiceCircuitBreakerIT proves it.
+    -->
+    <Match>
+        <Class name="com.investorbook.memberservice.service.AuthenticationServiceClient" />
+        <Method name="loginFallback" />
+        <Bug pattern="UPM_UNCALLED_PRIVATE_METHOD" />
+    </Match>
 </FindBugsFilter>

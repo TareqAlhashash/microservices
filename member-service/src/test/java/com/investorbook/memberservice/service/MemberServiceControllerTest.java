@@ -42,7 +42,6 @@ import com.investorbook.memberservice.dto.Member;
 import com.investorbook.memberservice.exception.MemberAlreadyExistsException;
 import com.investorbook.memberservice.exception.MemberNotFoundException;
 import com.investorbook.memberservice.exception.MemberUploadPicException;
-import com.investorbook.memberservice.proxy.AuthenticationServiceProxy;
 
 @ExtendWith(MockitoExtension.class)
 class MemberServiceControllerTest {
@@ -51,7 +50,7 @@ class MemberServiceControllerTest {
 	private MemberRepository memberRepository;
 
 	@Mock
-	private AuthenticationServiceProxy authenticationServiceProxy;
+	private AuthenticationServiceClient authenticationServiceClient;
 
 	@Mock
 	private ProfilePictureStorage profilePictureStorage;
@@ -63,7 +62,7 @@ class MemberServiceControllerTest {
 
 	@BeforeEach
 	void createController() {
-		controller = new MemberServiceController(memberRepository, authenticationServiceProxy,
+		controller = new MemberServiceController(memberRepository, authenticationServiceClient,
 				profilePictureStorage, passwordEncoder);
 	}
 
@@ -95,7 +94,7 @@ class MemberServiceControllerTest {
 		when(memberRepository.findOptionalByEmail("new@example.com")).thenReturn(Optional.empty());
 		when(passwordEncoder.encode("plaintext1")).thenReturn("hashed-pw");
 		AuthResponse token = new AuthResponse("access", "refresh", "bearer", "3600", "read", "jti-1");
-		when(authenticationServiceProxy.login(any())).thenReturn(ResponseEntity.ok(token));
+		when(authenticationServiceClient.login(any())).thenReturn(ResponseEntity.ok(token));
 
 		ResponseEntity<AuthResponse> response = controller.signUpMember(request);
 
@@ -117,7 +116,7 @@ class MemberServiceControllerTest {
 		assertThatThrownBy(() -> controller.signUpMember(request)).isInstanceOf(MemberAlreadyExistsException.class);
 
 		verify(memberRepository, never()).save(any());
-		verify(authenticationServiceProxy, never()).login(any());
+		verify(authenticationServiceClient, never()).login(any());
 	}
 
 	@Test

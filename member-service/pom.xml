@@ -42,6 +42,28 @@
 			<artifactId>spring-cloud-starter-openfeign</artifactId>
 		</dependency>
 
+		<!-- Circuit breaker around the call to api-gateway/auth-service during signup
+		     (AuthenticationServiceClient) - resilience4j-spring-boot2's @CircuitBreaker
+		     is woven via Spring AOP, hence spring-boot-starter-aop below. resilience4j-spring
+		     is pinned explicitly too: Hoxton's spring-cloud-dependencies BOM manages it to an
+		     older 1.7.0 than resilience4j-spring-boot2:1.7.1 expects, and the mismatch fails at
+		     context-startup time with NoSuchMethodError on SpelResolverConfiguration.spelResolver,
+		     not at build time. -->
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring-boot2</artifactId>
+			<version>1.7.1</version>
+		</dependency>
+		<dependency>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-spring</artifactId>
+			<version>1.7.1</version>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-aop</artifactId>
+		</dependency>
+
 		<!-- Must match the feign-form-spring version spring-cloud-openfeign-core pulls in
 		     transitively (3.8.0 under Hoxton.SR12) - 3.3.0 is missing a method
 		     feign-form-spring's SpringFormEncoder calls, which fails at bean-creation time

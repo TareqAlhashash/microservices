@@ -42,7 +42,7 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 
 | Module | `mvn test` | `mvn verify` | Notes |
 |---|---|---|---|
-| `member-service` | **12 unit tests, no Docker** | +9 integration tests, **needs Docker** | See below |
+| `member-service` | **13 unit tests, no Docker** | +11 integration tests, **needs Docker** | See below |
 | `auth-service` | **5 unit tests, no Docker** | +7 integration tests, **needs Docker** | See below |
 | `api-gateway` | **2 unit tests, no Docker** | +3 integration tests, no Docker needed | See below |
 | `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
@@ -62,11 +62,27 @@ trip — Surefire and Failsafe's default include patterns key off that suffix, s
 touching to keep the split working.
 
 ```bash
-cd member-service && mvn test                                     # 12 tests, seconds, no Docker
-cd member-service && mvn verify                                   # +9 integration tests, needs Docker
+cd member-service && mvn test                                     # 13 tests, seconds, no Docker
+cd member-service && mvn verify                                   # +11 integration tests, needs Docker
 cd member-service && mvn test -Dtest=MemberServiceControllerTest  # one unit test class
 cd member-service && mvn failsafe:integration-test -Dit.test=MemberPersistenceIT  # one IT class
 ```
+
+**Resilience**: `signUpMember`'s callback into api-gateway/auth-service (to mint the signup
+response's token) goes through `AuthenticationServiceClient`, not the raw `AuthenticationServiceProxy`
+Feign client directly — it wraps the call in a Resilience4j `@CircuitBreaker` (instance
+`authenticationService`, config in `application.properties`: opens after a 50%+ failure rate over
+a 4-call window) plus a Feign-level timeout (`feign.client.config.api-gateway.connectTimeout`/
+`readTimeout`, 2s each). By the time this call runs the new member row is already committed, so
+the fallback doesn't fail the whole request — it returns 202 with a token-less `AuthResponse`,
+meaning "your account exists, log in separately." `AuthenticationServiceCircuitBreakerIT` proves
+the circuit actually opens and short-circuits (not just "a failure returns a fallback"): it drives
+4 failures (each still calling the real, mocked-failing proxy) then asserts a 5th call gets the
+same graceful response *without* the proxy being invoked again. Needed an extra explicit
+`resilience4j-spring:1.7.1` dependency alongside `resilience4j-spring-boot2:1.7.1` — Hoxton's
+`spring-cloud-dependencies` BOM manages `resilience4j-spring` to an older `1.7.0`, and the
+mismatch fails at context-startup time (`NoSuchMethodError` on `SpelResolverConfiguration.
+spelResolver`), not at build time.
 
 If Testcontainers fails with "Could not find a valid Docker environment" on a 400 rather than a
 connection error, it's very likely the Docker-Engine-29+-vs-old-docker-java API version mismatch,
