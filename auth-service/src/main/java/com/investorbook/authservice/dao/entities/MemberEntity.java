@@ -38,6 +38,15 @@ public class MemberEntity {
 		this.passwordHash = passwordHash;
 	}
 
+	public MemberEntity(String id, @Email String email, String passwordHash) {
+		this(email, passwordHash);
+		this.id = id;
+	}
+
+	public String getId() {
+		return id;
+	}
+
 	public String getEmail() {
 		return email;
 	}

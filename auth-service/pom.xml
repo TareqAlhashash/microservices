@@ -14,7 +14,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.0.2.RELEASE</version>
+		<version>2.2.13.RELEASE</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 
@@ -22,7 +22,13 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>1.8</java.version>
-		<spring-cloud.version>Finchley.RC2</spring-cloud.version>
+		<spring-cloud.version>Hoxton.SR12</spring-cloud.version>
+		<!-- Same overrides member-service needed for the same Boot version on JDK 21:
+		     Boot 2.2's managed Mockito predates JDK 17+ bytecode support, and Boot's BOM
+		     otherwise pins byte-buddy to a version too old for the overridden Mockito. -->
+		<mockito.version>5.11.0</mockito.version>
+		<byte-buddy.version>1.14.13</byte-buddy.version>
+		<testcontainers.version>1.19.8</testcontainers.version>
 	</properties>
 
 	<dependencies>
@@ -81,6 +87,18 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- integration test container: real Postgres for the token-issuance flow -->
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.testcontainers</groupId>
+			<artifactId>postgresql</artifactId>
+			<scope>test</scope>
+		</dependency>
+
 	</dependencies>
 	<dependencyManagement>
 		<dependencies>
@@ -88,6 +106,13 @@
 				<groupId>org.springframework.cloud</groupId>
 				<artifactId>spring-cloud-dependencies</artifactId>
 				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<dependency>
+				<groupId>org.testcontainers</groupId>
+				<artifactId>testcontainers-bom</artifactId>
+				<version>${testcontainers.version}</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>
@@ -99,6 +124,36 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+			<!-- Same *Test (Surefire) / *IT (Failsafe) split as member-service: mvn test
+			     never touches Docker, only mvn verify does. -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-failsafe-plugin</artifactId>
+				<configuration>
+					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+				</configuration>
+				<executions>
+					<execution>
+						<goals>
+							<goal>integration-test</goal>
+							<goal>verify</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
+			<!-- Spring Security OAuth2's AuthorizationServerSecurityConfigurer eagerly builds a
+			     JAXB-based error message converter (unused - this app only speaks JSON), and
+			     jaxb-impl's reflective accessor optimization needs ClassLoader.defineClass open
+			     on JDK 16+, otherwise context startup fails with an NPE deep in jaxb-impl. Needed
+			     for any @SpringBootTest here, unlike member-service's JDK issue (a different root
+			     cause - see CLAUDE.md's "JDK 21 incompatibility" section on the untouched services). -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-surefire-plugin</artifactId>
+				<configuration>
+					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+				</configuration>
 			</plugin>
 		</plugins>
 	</build>
