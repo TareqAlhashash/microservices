@@ -53,6 +53,7 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 | `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
 | `order-service` | **9 unit tests, no Docker** | +4 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 | `payment-service` | **3 unit tests, no Docker** | +3 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `invoice-service` | **2 unit tests, no Docker** | +2 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 
 #### Shared error handling (common lib) — a real bug found while wiring it in
 
@@ -427,9 +428,9 @@ doesn't need.
 Phase 2.5 (built after the core services were hardened, before the C4/ADR documentation phase):
 a choreographed saga on top of the same Eureka/OAuth2 stack, demonstrating event-driven
 architecture, eventual consistency, and idempotent consumers — the distributed-systems concepts
-the rest of this repo doesn't touch. **`order-service` and `payment-service` are built so far**;
-`invoice-service` and `notification-service` are still to come (see the plan this was built from
-for the full design). Update this section as each one lands.
+the rest of this repo doesn't touch. **`order-service`, `payment-service`, and `invoice-service`
+are built so far**; `notification-service` is still to come (see the plan this was built from for
+the full design). Update this section as it lands.
 
 ### The flow
 
@@ -454,6 +455,11 @@ consumes `OrderPlaced` and makes a **mocked, deterministic** decision: orders at
 `PaymentEventListener.DECLINE_THRESHOLD` ($1000.00, simulating a simple risk/fraud threshold) get
 `PaymentFailed`; everything else gets `PaymentSucceeded`. The point is the event-driven
 orchestration and the saga's failure path, not a real payment integration.
+
+`invoice-service` also has no REST API - `InvoiceEventListener` consumes `PaymentSucceeded`,
+persists a real `Invoice` row (`invoiceNumber` is just `"INV-" + 8 random hex chars`, not a
+real sequential numbering scheme - a demo simplification worth naming if asked), and publishes
+`InvoiceIssued`.
 
 ### Shared pieces (in `common`)
 
@@ -489,9 +495,11 @@ orchestration and the saga's failure path, not a real payment integration.
   (`saveAndFlush`, not deferred to end-of-transaction) so the duplicate is caught *before* any
   Kafka send - Kafka isn't transactional with this database, so a message already sent can't be
   un-sent if the DB write is later found to conflict.
-  Proven by `PaymentServiceIT.aRedeliveredOrderPlaced_resultsInOnlyOnePaymentSucceeded`, which
-  publishes the same `OrderPlaced` (same event id) twice and asserts only one `PaymentSucceeded`
-  comes out.
+  Proven by `PaymentServiceIT.aRedeliveredOrderPlaced_resultsInOnlyOnePaymentSucceeded` and
+  `InvoiceServiceIT.aRedeliveredPaymentSucceeded_resultsInOnlyOneInvoice`, each publishing the
+  same event (same event id) twice and asserting only one downstream effect (one published event,
+  one persisted row) comes out - not just one, but exactly one, proving the redelivery was
+  actually detected and skipped rather than coincidentally not happening.
 
 ### Local infra and testing
 
@@ -511,8 +519,8 @@ match how the local docker-compose Kafka runs.
 producer and consumer sides — `payment-service`/`invoice-service`/`notification-service` aren't
 running in this test, so it publishes their events itself, standing in for them; each of those
 services proves its own reaction to its trigger event in its own suite instead - `PaymentServiceIT`
-is the first example, proving `payment-service`'s reaction to `OrderPlaced` - which together prove
-the same chain without one fragile multi-service-in-one-JVM test), the compensating path
+and `InvoiceServiceIT` are the examples so far - which together prove the same chain without one
+fragile multi-service-in-one-JVM test), the compensating path
 (`PaymentFailed` → `PAYMENT_FAILED`), idempotency (above), and that `OrderPlaced` is actually
 published with the order id as the Kafka key. Two Kafka-test-API gotchas worth knowing if you
 write another one of these: `KafkaTestUtils.getRecords(consumer, timeout)` takes a `long`
