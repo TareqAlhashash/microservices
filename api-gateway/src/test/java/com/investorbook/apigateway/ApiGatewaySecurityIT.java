@@ -128,6 +128,14 @@ class ApiGatewaySecurityIT {
 		assertThat(response.getBody()).contains("validation failed");
 	}
 
+	@Test
+	void actuatorHealth_isReachableWithoutAToken() {
+		ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health", String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody()).contains("\"status\":\"UP\"");
+	}
+
 	/*
 	 * Deliberately not testing /uaa/oauth/token or /member-service/signup the
 	 * same way as /login: both are Zuul-proxied routes with no real controller

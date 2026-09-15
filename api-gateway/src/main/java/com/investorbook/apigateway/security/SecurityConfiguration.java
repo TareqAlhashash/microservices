@@ -15,7 +15,8 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 
 	@Override
 	public void configure(WebSecurity web) throws Exception {
-		web.ignoring().antMatchers("/login", "/uaa/oauth/token", "/member-service/signup");
+		// /actuator/**: see member-service's SecurityConfiguration for why this is unauthenticated.
+		web.ignoring().antMatchers("/login", "/uaa/oauth/token", "/member-service/signup", "/actuator/**");
 	}
 	@Override
 	protected void configure(HttpSecurity http) throws Exception {

@@ -42,11 +42,11 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 
 | Module | `mvn test` | `mvn verify` | Notes |
 |---|---|---|---|
-| `member-service` | **13 unit tests, no Docker** | +12 integration tests, **needs Docker** | See below |
-| `auth-service` | **5 unit tests, no Docker** | +7 integration tests, **needs Docker** | See below |
-| `api-gateway` | **2 unit tests, no Docker** | +4 integration tests, no Docker needed | See below |
+| `member-service` | **13 unit tests, no Docker** | +13 integration tests, **needs Docker** | See below |
+| `auth-service` | **5 unit tests, no Docker** | +8 integration tests, **needs Docker** | See below |
+| `api-gateway` | **2 unit tests, no Docker** | +5 integration tests, no Docker needed | See below |
 | `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
-| `resource-service` | **1 unit test, no Docker** | +3 integration tests, no Docker needed | See below |
+| `resource-service` | **1 unit test, no Docker** | +4 integration tests, no Docker needed | See below |
 | `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
 
 #### Shared error handling (common lib) — a real bug found while wiring it in
@@ -94,7 +94,7 @@ touching to keep the split working.
 
 ```bash
 cd member-service && mvn test                                     # 13 tests, seconds, no Docker
-cd member-service && mvn verify                                   # +12 integration tests, needs Docker
+cd member-service && mvn verify                                   # +13 integration tests, needs Docker
 cd member-service && mvn test -Dtest=MemberServiceControllerTest  # one unit test class
 cd member-service && mvn failsafe:integration-test -Dit.test=MemberPersistenceIT  # one IT class
 ```
@@ -142,7 +142,7 @@ service to test. Same `*Test`/`*IT` split, same Docker API pin in
 
 ```bash
 cd auth-service && mvn test                                  # 5 tests, seconds, no Docker
-cd auth-service && mvn verify                                 # +7 integration tests, needs Docker
+cd auth-service && mvn verify                                 # +8 integration tests, needs Docker
 ```
 
 Any `@SpringBootTest` here hits a JDK 21 failure too, but a different root cause from the one
@@ -181,7 +181,7 @@ relies on downstream (see member-service's `MemberServiceController`).
 
 ```bash
 cd resource-service && mvn test                                 # 1 test, seconds, no Docker
-cd resource-service && mvn verify                                # +3 integration tests, no Docker needed
+cd resource-service && mvn verify                                # +4 integration tests, no Docker needed
 ```
 
 #### api-gateway: same Boot bump, plus a real (not just test-time) runtime bug found and fixed
@@ -224,7 +224,7 @@ Eureka, not a gap in what `/login` already proves about the ignore-list mechanis
 
 ```bash
 cd api-gateway && mvn test                                      # 2 tests, seconds, no Docker
-cd api-gateway && mvn verify                                     # +4 integration tests, no Docker needed
+cd api-gateway && mvn verify                                     # +5 integration tests, no Docker needed
 ```
 
 #### JDK 21 incompatibility in the untouched service
@@ -337,8 +337,12 @@ This is an OAuth2 **password grant + JWT** setup, not session-based auth:
 4. Every other service (`api-gateway`'s protected routes, `member-service`, `resource-service`) is
    an `@EnableResourceServer` that verifies the same JWT using the **public** key
    (`security.oauth2.resource.jwt.key-value` / `investorbook.security.jwt.public.key`) —
-   the identical PEM string is duplicated across every `application.properties` file. Changing the
-   keypair means updating it everywhere in lockstep.
+   the identical PEM string is duplicated across every `application.properties` file as the
+   fallback of a `${JWT_PUBLIC_KEY:...}` placeholder (same pattern for the DB password
+   `${DB_PASSWORD:...}` and the html5 client secret `${HTML5_CLIENT_SECRET:...}` /
+   `${HTML5_CLIENT_SECRET_HASH:...}` — see "Config & secrets" below). Changing the keypair for
+   real still means updating every service's env var in lockstep; the placeholder only removes
+   the "it's a literal in source" problem, not the duplication itself.
 5. All resource servers are `SessionCreationPolicy.STATELESS` — no server-side session state
    anywhere; authorization is entirely re-derived from the JWT on each request.
 
@@ -348,6 +352,34 @@ template for this). `member-service`'s `MemberServiceApiIntegrationTest` proves 
 works end-to-end (401 with no token, 404 with a valid token and no matching account, `@PreAuthorize`
 enforced) by minting a JWT directly against a test signing key — see that test's class Javadoc for
 why it doesn't depend on `auth-service` being up.
+
+### Config & secrets
+
+Every literal secret that used to sit directly in an `application.properties` value is now
+`${ENV_VAR:same-literal-as-before}` — the fallback preserves today's behaviour exactly (no env
+var set anywhere in dev/test), while a real deployment overrides it: `DB_USERNAME`/`DB_PASSWORD`
+(`auth-service`, `member-service`), `JWT_PUBLIC_KEY` (all four resource-server-side services),
+`JWT_PRIVATE_KEY` (`auth-service` only, since only it signs), `HTML5_CLIENT_SECRET`
+(`api-gateway`'s plaintext copy) and `HTML5_CLIENT_SECRET_HASH` (`auth-service`'s BCrypt copy of
+the *same* secret — two different env vars because one is a hash and one isn't). The comment
+that used to sit right above `auth-service`'s BCrypt hash revealing its plaintext
+(`#html5secretpass123`) is gone; that line existed purely to defeat the point of hashing it. No
+`.env`/secrets-manager integration is wired in here — see the README's "Config & secrets" section
+for what a real deployment would use instead.
+
+### Observability
+
+`spring-boot-starter-actuator` is on every service's classpath (transitively, via
+`spring-cloud-starter-netflix-eureka-client`, which needs it for Eureka's own health-check
+integration — nothing had to declare it explicitly). `management.endpoints.web.exposure.include=
+health,info,metrics` is now set explicitly in every service (previously whatever Boot's own
+default was), and each service's `SecurityConfiguration` adds `/actuator/**` to its
+`WebSecurity.ignoring()` list — deliberately unauthenticated, since a health-check probe or
+metrics scraper doesn't carry this app's own bearer token. In a real deployment these would sit
+on a separate management port/network instead of the public one (`management.server.port`); not
+done here to keep the demo's moving parts down. Every touched service's IT suite has a plain
+`actuatorHealth_isReachableWithoutAToken` test proving the carve-out actually works, not just
+that the property is set.
 
 ### Why member-service, auth-service, resource-service, api-gateway, and common are on a different Boot version
 

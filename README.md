@@ -102,19 +102,76 @@ lazy-loading and dirty-checking, which depend on identity, not value equality. D
 suppressed in `member-service/spotbugs-exclude.xml` rather than silently ignored or blindly
 "fixed" into a worse state.
 
+## Phase 2: hardening the four tested services
+
+Once every service that could reasonably be tested had a real suite, the next pass made the
+system look like something that could actually run in production, not just pass tests:
+
+- **A circuit breaker on a real failure mode.** `member-service`'s signup flow calls back into
+  `api-gateway`/`auth-service` to mint the new member's token. That call now goes through
+  `AuthenticationServiceClient` — a Resilience4j `@CircuitBreaker` plus a Feign-level timeout —
+  instead of the raw Feign client. The member row is already committed by the time this runs, so
+  the fallback returns 202 with no token ("your account exists, log in separately") rather than a
+  500 that would wrongly imply signup itself failed. The integration test proves the circuit
+  actually *opens and short-circuits*, not just that one failure returns a fallback.
+- **A shared error handler that turned out to have a real, hidden bug.** `common`'s
+  `CustomizedResponseEntityExceptionHandler` was silently only active in `member-service` — the
+  other three services never scanned `com.investorbook.common`, so it did nothing there. Wiring it
+  in surfaced a genuine, pre-existing defect: its `Exception.class` catch-all was intercepting
+  `AccessDeniedException` *before* Spring Security's own filter could turn it into a 403, so every
+  `@PreAuthorize` denial was silently reported as a 500 — in every service, `member-service`
+  included, just never caught there because nothing had tested a wrong-role request. Fixed with
+  narrower handlers that rethrow security exceptions instead of swallowing them.
+- **Validation that was declared but never enforced.** `api-gateway`'s `/login` took an
+  `AuthRequest` with `@NotNull`/`@Size` constraints already on the DTO, but the controller method
+  never had `@Valid` — so they were silently ignored. Now it does, and a missing field gets a
+  proper 400 in the same shared error shape as everything else.
+
+## Observability
+
+Every service now exposes `/actuator/health`, `/actuator/info`, and `/actuator/metrics` without
+requiring the app's own JWT — a health-check probe or metrics scraper doesn't carry one. In a real
+deployment these would live on a separate management port/network rather than the public one;
+that split wasn't worth the added complexity for a demo-scale system. To wire this into an actual
+observability stack: point Prometheus at each service's `/actuator/prometheus` (needs the
+`micrometer-registry-prometheus` dependency added — not done here) on a scrape interval, and ship
+each service's stdout/stderr through Filebeat or a Fluent Bit sidecar into an ELK stack, tagging
+by `spring.application.name` so logs from all five services land in one searchable index.
+`api-gateway` and `member-service` already emit Sleuth-correlated trace/span IDs in every log
+line (`[api-gateway,traceId,spanId,exportable]`), which is what makes a single request traceable
+across service boundaries in that same ELK index — extending that to `auth-service` and
+`resource-service` would just mean adding `spring-cloud-starter-sleuth` there too.
+
+## Config & secrets
+
+Every secret that used to sit as a literal in `application.properties` — the Postgres password,
+the RSA JWT keypair, the OAuth2 client secret (plaintext in `api-gateway`, its BCrypt hash in
+`auth-service`) — is now `${ENV_VAR:same-value-as-before}`, so nothing's behavior changed by
+default, but every one of them is overridable without touching a file. In a real deployment, none
+of these would have a literal fallback at all: the keypair and client secret would come from a
+secrets manager (AWS Secrets Manager, HashiCorp Vault, or a Kubernetes `Secret` mounted as an
+env var), rotated independently of a deploy, and the RSA keypair itself would be generated per
+environment rather than the same demo pair checked into five `application.properties` files.
+
 ## What's covered, and what honestly isn't
 
-- **Tested**: `member-service` only — unit tests, a real Postgres integration test, a real S3
-  (LocalStack) integration test, and a full HTTP+security end-to-end test. 21 tests, all green.
-- **Not tested**: `auth-service`, `api-gateway`, `resource-service`, `eureka-server` — untouched
-  from their original generated state, still with no coverage beyond the default
-  `contextLoads()` smoke test (or none at all, for `auth-service`).
-- **Security scan**: SpotBugs/FindSecBugs is wired into `member-service`'s `mvn verify` and clean.
-  OWASP Dependency-Check is declared but has never actually completed a run in this environment —
-  without an NVD API key, its first sync ran for the better part of half an hour, started hitting
-  rate-limit retries, and was still under 15% through the feed when I stopped it. It's a
-  documented follow-up (run it with `NVD_API_KEY` set, or from CI), not a finished result.
+- **Tested**: `member-service`, `auth-service`, `resource-service`, `api-gateway`, and the shared
+  `common` library — unit tests, real Postgres/S3 (Testcontainers/LocalStack) integration tests,
+  full HTTP+security end-to-end tests, and (for `member-service`) a circuit-breaker integration
+  test. `mvn verify` is green on all five.
+- **Not tested**: `eureka-server` only — it's the naming server with no custom logic of its own,
+  so there's nothing here to write a meaningful test against.
+- **Security scan**: SpotBugs/FindSecBugs is wired into every tested module's `mvn verify` and
+  clean. OWASP Dependency-Check is declared but has never actually completed a run in this
+  environment — without an NVD API key, its first sync ran for the better part of half an hour,
+  started hitting rate-limit retries, and was still under 15% through the feed when I stopped it.
+  It's a documented follow-up (run it with `NVD_API_KEY` set, or from CI), not a finished result.
 - **No CI yet.** Nothing here has run anywhere but this machine.
+- **Demo-scale, not production-scale, on purpose**: one Postgres instance shared by every service
+  that needs one (no per-service database isolation), a single hardcoded demo RSA keypair
+  (env-overridable, but the same pair ships as everyone's fallback), and no message
+  broker/event-driven flow yet (that's planned next, as a separate purchase-flow subsystem, before
+  this repo gets documented with ADRs and C4 diagrams).
 
 ## Running it
 

@@ -131,6 +131,14 @@ class MemberServiceApiIT {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 
+	@Test
+	void actuatorHealth_isReachableWithoutAToken() {
+		ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health", String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody()).contains("\"status\":\"UP\"");
+	}
+
 	/**
 	 * Regression test: the shared CustomizedResponseEntityExceptionHandler (in
 	 * common, inherited here via MemberResponseEntityExceptionHandler) used to

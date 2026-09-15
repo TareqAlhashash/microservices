@@ -23,7 +23,10 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 
 	@Override
 	public void configure(WebSecurity web) throws Exception {
-		web.ignoring().antMatchers("/signup");
+		// /actuator/** unauthenticated: health checks/metrics scrapers don't carry this app's
+		// own bearer tokens. In a real deployment these would sit on a separate management
+		// port/network rather than the public one - not done here to keep the demo simple.
+		web.ignoring().antMatchers("/signup", "/actuator/**");
 	}
 
 	@Override

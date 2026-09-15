@@ -92,4 +92,12 @@ class ResourceServiceApiIT {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat(response.getBody()).isEqualTo("hi");
 	}
+
+	@Test
+	void actuatorHealth_isReachableWithoutAToken() {
+		ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health", String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody()).contains("\"status\":\"UP\"");
+	}
 }

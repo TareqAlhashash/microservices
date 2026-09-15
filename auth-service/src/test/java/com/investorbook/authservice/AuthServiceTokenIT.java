@@ -150,6 +150,14 @@ class AuthServiceTokenIT {
 	}
 
 	@Test
+	void actuatorHealth_isReachableWithoutAToken() {
+		ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health", String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody()).contains("\"status\":\"UP\"");
+	}
+
+	@Test
 	void checkTokenEndpoint_rejectsRequestsWithNoClientCredentials() {
 		givenAMemberExists("introspect@example.com", "correct-horse");
 		String accessToken = extractField(
