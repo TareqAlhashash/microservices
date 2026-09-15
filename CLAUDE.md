@@ -5,9 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repository is
 
 "InvestorBook" — a Spring Cloud microservices demo (originally Spring Boot 2.0.2, Spring Cloud
-Finchley, Java 8) modeling a social network for investors. See [`README.md`](README.md) for the
-portfolio-hardening narrative (what changed, why, and what's still honestly not done);
-per-endpoint field docs for planned features live in `api-gateway/requirements-member.txt` and
+Finchley, Java 8) modeling a social network for investors. See [`README.md`](README.md) for a
+short overview with the C4 diagrams (System Context, and Container diagrams for the core
+services and the purchase flow), and [`docs/adr/`](docs/adr/) for the architecture decision
+records behind the choices documented in this file (service discovery/gateway, OAuth2, the
+`common` library, per-service data ownership, and the four Kafka-saga decisions); per-endpoint
+field docs for planned features live in `api-gateway/requirements-member.txt` and
 `api-gateway/requierments-security.txt` (note the typo in the filename — don't "fix" it without
 checking for other references).
 
