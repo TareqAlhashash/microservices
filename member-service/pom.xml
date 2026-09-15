@@ -42,10 +42,16 @@
 			<artifactId>spring-cloud-starter-openfeign</artifactId>
 		</dependency>
 
+		<!-- Must match the feign-form-spring version spring-cloud-openfeign-core pulls in
+		     transitively (3.8.0 under Hoxton.SR12) - 3.3.0 is missing a method
+		     feign-form-spring's SpringFormEncoder calls, which fails at bean-creation time
+		     with NoSuchMethodError as soon as anything triggers Feign's form encoder. Masked
+		     in this module's own tests because AuthenticationServiceProxy is @MockBean'd
+		     (see MemberServiceApiIT) - found by actually running api-gateway standalone. -->
 		<dependency>
 			<groupId>io.github.openfeign.form</groupId>
 			<artifactId>feign-form</artifactId>
-			<version>3.3.0</version>
+			<version>3.8.0</version>
 		</dependency>
 		
 		<!-- a naming server client, this connects to the naming server and register/discover 

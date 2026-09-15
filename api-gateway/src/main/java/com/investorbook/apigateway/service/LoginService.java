@@ -2,7 +2,6 @@ package com.investorbook.apigateway.service;
 
 import java.util.Base64;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -17,14 +16,17 @@ import com.investorbook.common.dto.AuthResponse;
 @RestController
 public class LoginService {
 
-	@Autowired
-	private OauthServiceProxy oauthServiceProxy;
+	private final OauthServiceProxy oauthServiceProxy;
 
-	@Autowired
-	private JwtAuthenticationConfig config;
+	private final JwtAuthenticationConfig config;
+
+	public LoginService(OauthServiceProxy oauthServiceProxy, JwtAuthenticationConfig config) {
+		this.oauthServiceProxy = oauthServiceProxy;
+		this.config = config;
+	}
 
 	@Bean
-	public JwtAuthenticationConfig jwtConfig() {
+	public static JwtAuthenticationConfig jwtConfig() {
 		return new JwtAuthenticationConfig();
 	}
 
