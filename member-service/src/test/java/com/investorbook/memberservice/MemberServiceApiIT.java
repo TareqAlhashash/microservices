@@ -72,7 +72,7 @@ class MemberServiceApiIT {
 	@MockBean
 	private AuthenticationServiceProxy authenticationServiceProxy;
 
-	private static String tokenFor(String email) {
+	private static String tokenFor(String email, String... authorities) {
 		JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
 		converter.setSigningKey(SIGNING_KEY);
 
@@ -80,7 +80,7 @@ class MemberServiceApiIT {
 				Collections.singleton("read"), Collections.emptySet(), null, Collections.emptySet(),
 				Collections.emptyMap());
 		UsernamePasswordAuthenticationToken userAuth = new UsernamePasswordAuthenticationToken(email, null,
-				AuthorityUtils.createAuthorityList("ROLE_MEMBER"));
+				AuthorityUtils.createAuthorityList(authorities));
 		OAuth2Authentication authentication = new OAuth2Authentication(request, userAuth);
 
 		OAuth2AccessToken accessToken = new DefaultOAuth2AccessToken("placeholder");
@@ -88,6 +88,12 @@ class MemberServiceApiIT {
 	}
 
 	private static HttpEntity<Void> authorizedRequest(String email) {
+		HttpHeaders headers = new HttpHeaders();
+		headers.setBearerAuth(tokenFor(email, "ROLE_MEMBER"));
+		return new HttpEntity<>(headers);
+	}
+
+	private static HttpEntity<Void> requestWithNoRoles(String email) {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setBearerAuth(tokenFor(email));
 		return new HttpEntity<>(headers);
@@ -123,6 +129,24 @@ class MemberServiceApiIT {
 		ResponseEntity<String> response = restTemplate.getForEntity("/member", String.class);
 
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
+	}
+
+	/**
+	 * Regression test: the shared CustomizedResponseEntityExceptionHandler (in
+	 * common, inherited here via MemberResponseEntityExceptionHandler) used to
+	 * have a generic Exception.class catch-all that intercepted @PreAuthorize
+	 * denials before Spring Security's own filter could turn them into a 403 -
+	 * reporting every wrong-role request as a 500 instead. Found while wiring
+	 * the same handler into resource-service, which actually tests wrong-role
+	 * access; this member-service endpoint uses the identical mechanism but had
+	 * no test exercising this specific path before.
+	 */
+	@Test
+	void member_isForbidden_forAValidTokenWithoutTheMemberRole() {
+		ResponseEntity<String> response = restTemplate.exchange("/member", HttpMethod.GET,
+				requestWithNoRoles("no-role@example.com"), String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
 	}
 
 	@Test

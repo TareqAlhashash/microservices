@@ -10,7 +10,7 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.0.2.RELEASE</version>
+		<version>2.2.13.RELEASE</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 	<name>common</name>
@@ -20,7 +20,12 @@
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>1.8</java.version>
-		<spring-cloud.version>Finchley.BUILD-SNAPSHOT</spring-cloud.version>
+		<spring-cloud.version>Hoxton.SR12</spring-cloud.version>
+		<!-- Same overrides the other modules need for this Boot version on JDK 21:
+		     Boot 2.2's managed Mockito predates JDK 17+ bytecode support, and Boot's BOM
+		     otherwise pins byte-buddy to a version too old for the overridden Mockito. -->
+		<mockito.version>5.11.0</mockito.version>
+		<byte-buddy.version>1.14.13</byte-buddy.version>
 	</properties>
 
 	<dependencies>
@@ -32,10 +37,13 @@
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-openfeign</artifactId>
 		</dependency>
+		<!-- Must match the feign-form-spring version spring-cloud-openfeign-core pulls in
+		     transitively (3.8.0 under Hoxton.SR12) - see member-service/api-gateway poms for
+		     the NoSuchMethodError this fixes. -->
 		<dependency>
 			<groupId>io.github.openfeign.form</groupId>
 			<artifactId>feign-form</artifactId>
-			<version>3.3.0</version>
+			<version>3.8.0</version>
 		</dependency>
 
 		<dependency>
@@ -46,17 +54,17 @@
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-oauth2</artifactId>
 		</dependency>
-		
-		<!-- dependency> <groupId>com.amazonaws</groupId> <artifactId>aws-java-sdk</artifactId> 
+
+		<!-- dependency> <groupId>com.amazonaws</groupId> <artifactId>aws-java-sdk</artifactId>
 			<version>1.11.327</version> </dependency> -->
-		
+
 		<dependency>
 			<groupId>com.amazonaws</groupId>
 			<artifactId>aws-java-sdk-s3</artifactId>
 		</dependency>
 		<dependency>
-			<groupId>junit</groupId>
-			<artifactId>junit</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
 
@@ -74,14 +82,6 @@
 	</dependencyManagement>
 
 	<repositories>
-		<repository>
-			<id>spring-snapshots</id>
-			<name>Spring Snapshots</name>
-			<url>https://repo.spring.io/snapshot</url>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-		</repository>
 		<repository>
 			<id>spring-milestones</id>
 			<name>Spring Milestones</name>

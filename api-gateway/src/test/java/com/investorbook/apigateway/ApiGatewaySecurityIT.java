@@ -107,6 +107,27 @@ class ApiGatewaySecurityIT {
 		assertThat(response.getBody().getAccessToken()).isEqualTo("access");
 	}
 
+	/**
+	 * AuthRequest's @NotNull/@Size constraints only bite now that login() takes
+	 * @Valid - proves both that validation actually runs and that the shared
+	 * CustomizedResponseEntityExceptionHandler (imported into
+	 * ApiGatewayApplication) produces its usual error shape for it, same as any
+	 * other validation failure in the system.
+	 */
+	@Test
+	void login_rejectsAMissingPassword_with400() {
+		HttpHeaders headers = new HttpHeaders();
+		headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
+		form.add("username", "jane@example.com");
+
+		ResponseEntity<String> response = restTemplate.postForEntity("/login", new HttpEntity<>(form, headers),
+				String.class);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+		assertThat(response.getBody()).contains("validation failed");
+	}
+
 	/*
 	 * Deliberately not testing /uaa/oauth/token or /member-service/signup the
 	 * same way as /login: both are Zuul-proxied routes with no real controller

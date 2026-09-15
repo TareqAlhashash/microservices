@@ -42,12 +42,43 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 
 | Module | `mvn test` | `mvn verify` | Notes |
 |---|---|---|---|
-| `member-service` | **13 unit tests, no Docker** | +11 integration tests, **needs Docker** | See below |
+| `member-service` | **13 unit tests, no Docker** | +12 integration tests, **needs Docker** | See below |
 | `auth-service` | **5 unit tests, no Docker** | +7 integration tests, **needs Docker** | See below |
-| `api-gateway` | **2 unit tests, no Docker** | +3 integration tests, no Docker needed | See below |
+| `api-gateway` | **2 unit tests, no Docker** | +4 integration tests, no Docker needed | See below |
 | `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
 | `resource-service` | **1 unit test, no Docker** | +3 integration tests, no Docker needed | See below |
-| `common` | nothing to run | nothing to run | Library, no tests |
+| `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
+
+#### Shared error handling (common lib) — a real bug found while wiring it in
+
+`common`'s `CustomizedResponseEntityExceptionHandler` (`@ControllerAdvice`, uniform
+`{timestamp, message, details}` error body) was previously only active in `member-service` — the
+other three services didn't scan `com.investorbook.common`, so its generic `Exception.class` →
+500 and `@Valid` → 400 mapping simply didn't apply there. Each of `auth-service`,
+`resource-service`, and `api-gateway`'s `*Application.java` now explicitly
+`@Import(CustomizedResponseEntityExceptionHandler.class)` (`auth-service`/`resource-service`
+needed the `common` dependency added for this — they didn't have it before). `api-gateway`'s
+`LoginService.login` also gained `@Valid` on its `AuthRequest` parameter, so `AuthRequest`'s
+existing `@NotNull`/`@Size` constraints are actually enforced now — previously they were declared
+but silently ignored, since nothing bound the request with validation switched on.
+
+Wiring the handler into `resource-service` immediately turned up a real, pre-existing bug (caught
+by `ResourceServiceApiIT`'s wrong-role test going from 403 to 500): the handler's
+`@ExceptionHandler(Exception.class)` catch-all was intercepting `AccessDeniedException` *inside*
+the `DispatcherServlet`, before Spring Security's own `ExceptionTranslationFilter` ever got a
+chance to turn it into a 403 — so every `@PreAuthorize` denial silently became a 500. Fixed by
+adding narrower `@ExceptionHandler` methods for `AccessDeniedException` and
+`AuthenticationException` that just rethrow, letting Spring's handler-resolution machinery prefer
+the more specific match and the exception propagate to the security filter chain as normal. This
+bug was **already live in `member-service` too** (inherited via `MemberResponseEntityExceptionHandler
+extends CustomizedResponseEntityExceptionHandler`) — nothing there had ever tested a wrong-role
+(as opposed to no-token) request against a `@PreAuthorize`'d endpoint. `MemberServiceApiIT` gained
+`member_isForbidden_forAValidTokenWithoutTheMemberRole` to close that gap and prove the real fix.
+`common` itself also has a `@Valid`/`BindException` override now (for `LoginService`'s implicit,
+unannotated-parameter form binding, which fails with `BindException` rather than
+`MethodArgumentNotValidException`), and got the same Boot 2.0.2 → 2.2.13/Hoxton.SR12 bump as the
+other four modules specifically so this could be given real JUnit 5 test coverage
+(`CustomizedResponseEntityExceptionHandlerTest`) for the first time.
 
 #### member-service: unit vs. integration tests, and Docker
 
@@ -63,7 +94,7 @@ touching to keep the split working.
 
 ```bash
 cd member-service && mvn test                                     # 13 tests, seconds, no Docker
-cd member-service && mvn verify                                   # +11 integration tests, needs Docker
+cd member-service && mvn verify                                   # +12 integration tests, needs Docker
 cd member-service && mvn test -Dtest=MemberServiceControllerTest  # one unit test class
 cd member-service && mvn failsafe:integration-test -Dit.test=MemberPersistenceIT  # one IT class
 ```
@@ -136,9 +167,11 @@ Unlike `auth-service`, it's a plain `@EnableResourceServer` (not an authorizatio
 never builds the JAXB-based error converter and needs no `--add-opens` at all — `mvn test`/`mvn
 verify` just work. One catch the bump surfaced: Hoxton's `spring-cloud-starter-security` no longer
 pulls `spring-security-oauth2` transitively (member-service gets it via the `common` lib instead;
-this module doesn't depend on `common`), so `spring-cloud-starter-oauth2` had to be added directly,
-matching what `auth-service` already declares — without it, `JwtConvertor.java`'s existing
-`OAuth2Authentication`/`DefaultAccessTokenConverter` usage doesn't even compile under Hoxton.
+this module didn't depend on `common` at the time), so `spring-cloud-starter-oauth2` had to be
+added directly, matching what `auth-service` already declares — without it, `JwtConvertor.java`'s
+existing `OAuth2Authentication`/`DefaultAccessTokenConverter` usage doesn't even compile under
+Hoxton. (`common` was added as a dependency later, for the shared error handler — see "Shared
+error handling" above.)
 
 `ResourceServiceApiIT` mints JWTs against a test signing key (no real dependency to exercise via
 Testcontainers here) and proves the actual filter chain: no token → 401, a valid token without
@@ -179,8 +212,10 @@ the stale pin, and the first real Feign form-encode call failed with `NoSuchMeth
 keeps the OAuth2 client secret off the wire to browser/mobile clients. `ApiGatewaySecurityIT`
 (real HTTP + filter chain, `OauthServiceProxy` mocked since auth-service isn't running in the
 test) proves default-deny (401 without a token), token acceptance (a valid bearer token is not
-rejected by the gateway's own security layer), and that `/login` bypasses that security layer
-entirely so a client can obtain a token in the first place. Deliberately does **not** test
+rejected by the gateway's own security layer), that `/login` bypasses that security layer
+entirely so a client can obtain a token in the first place, and (once `@Valid` was added to
+`LoginService.login`, see "Shared error handling" above) that a missing field gets a 400 in the
+shared error shape. Deliberately does **not** test
 `/uaa/oauth/token` or `/member-service/signup` the same way: both are pure Zuul-proxied routes
 with no controller of their own in this app, and with Eureka disabled (as in every test here)
 Zuul can't resolve them, forwarding internally to an error dispatch that produces a 401 for
@@ -189,7 +224,7 @@ Eureka, not a gap in what `/login` already proves about the ignore-list mechanis
 
 ```bash
 cd api-gateway && mvn test                                      # 2 tests, seconds, no Docker
-cd api-gateway && mvn verify                                     # +3 integration tests, no Docker needed
+cd api-gateway && mvn verify                                     # +4 integration tests, no Docker needed
 ```
 
 #### JDK 21 incompatibility in the untouched service
@@ -209,8 +244,8 @@ Spring 5.0.6 (pulled in by Boot 2.0.2) generates cglib proxies via reflection on
 `ClassLoader.defineClass`, which the JPMS module system blocks from Java 16 onward without an
 explicit `--add-opens`. A quick `-DargLine="--add-opens java.base/java.lang=ALL-UNNAMED"` did
 **not** resolve it in a direct check — this needs either JDK 8/11 (what Boot 2.0.2 actually
-targets and was never validated past) or the same kind of Boot version bump the other four
-modules got (see "Why member-service, auth-service, resource-service, and api-gateway are on a
+targets and was never validated past) or the same kind of Boot version bump the other modules got
+(see "Why member-service, auth-service, resource-service, api-gateway, and common are on a
 different Boot version"). Confirmed by actually running its tests, not inferred from the version
 number alone.
 
@@ -251,10 +286,12 @@ Start order matters because services register with and discover each other throu
   `WebSecurity.ignoring()`), with method-level `@PreAuthorize("hasRole('MEMBER')")` on the rest.
   **Signup is a two-hop flow**: `MemberServiceController.signUpMember` saves the new member (linking
   `address.setMember(member)` first — required for the `@MapsId` cascade to work at all), then calls
-  back out to `api-gateway`'s `/login` through `AuthenticationServiceProxy` (a Feign client) to
-  obtain a token, so a client only calls member-service once and gets a JWT back. This is the only
-  module on Spring Boot 2.2.13 / JUnit 5 — see "Why member-service is on a different Boot version"
-  below.
+  back out to `api-gateway`'s `/login` through `AuthenticationServiceClient` (a circuit-breaker-
+  and-timeout-wrapped `AuthenticationServiceProxy` Feign client — see "Resilience" under member-service's
+  testing section) to obtain a token, so a client only calls member-service once and gets a JWT
+  back. See "Why member-service, auth-service, resource-service, api-gateway, and common are on a
+  different Boot version" below for why this and three other modules (plus `common`) are on
+  Spring Boot 2.2.13 / JUnit 5 while `eureka-server` isn't.
 - **resource-service** — skeletal `@EnableResourceServer` example service (single `/hi` endpoint) —
   a template for adding new protected microservices, not a real feature.
 - **api-gateway** — Zuul (`@EnableZuulProxy`) reverse proxy and single external entry point.
@@ -281,7 +318,12 @@ Start order matters because services register with and discover each other throu
     explicitly with `@Import(S3Config.class)` (member-service's `MemberServiceApplication` does
     this) — it won't be picked up by scanning alone.
   - `exception/CustomizedResponseEntityExceptionHandler` — a `@ControllerAdvice` mapping any
-    uncaught exception to 500 and `MethodArgumentNotValidException` to 400.
+    uncaught exception to 500 and `MethodArgumentNotValidException`/`BindException` (the two
+    shapes a failed `@Valid` can take) to 400, with a uniform `{timestamp, message, details}`
+    body throughout. Explicitly rethrows `AccessDeniedException`/`AuthenticationException`
+    rather than handling them — see "Shared error handling" for the real 403-became-500 bug that
+    omission caused. Every service now `@Import`s this (`member-service` gets it transitively via
+    its own `MemberResponseEntityExceptionHandler extends` it instead).
 
 ### Security model (the architectural throughline)
 
@@ -307,20 +349,23 @@ works end-to-end (401 with no token, 404 with a valid token and no matching acco
 enforced) by minting a JWT directly against a test signing key — see that test's class Javadoc for
 why it doesn't depend on `auth-service` being up.
 
-### Why member-service, auth-service, resource-service, and api-gateway are on a different Boot version
+### Why member-service, auth-service, resource-service, api-gateway, and common are on a different Boot version
 
 `member-service` was bumped from Spring Boot 2.0.2 to **2.2.13** (Spring Cloud `Hoxton.SR12`)
 specifically to get JUnit 5 as the default in `spring-boot-starter-test`, before any test suite was
 written for it — Boot 2.0.2's bundled Surefire (2.21.0) predates JUnit Platform support entirely.
-`auth-service`, `resource-service`, and `api-gateway` later got the identical bump for the same
-reason. Only `eureka-server` remains deliberately untouched: all five modules only interoperate
-over REST/Eureka, never a shared JAR, so there's no cross-module coupling to the version bump — if
-it ever gets its own test suite, expect to hit the same overrides. Two follow-on overrides were
-needed on every bumped module to make the JDK on this machine (21) actually work with the upgraded
-test stack: `mockito.version` (Boot 2.2's managed Mockito predates JDK 17+ bytecode support) and,
-less obviously, `byte-buddy.version` (Boot's BOM otherwise still pins byte-buddy to a version too
-old for the overridden Mockito, which fails at mock-creation time with `NoClassDefFoundError`, not
-at build time).
+`auth-service`, `resource-service`, `api-gateway`, and (later still, for the same reason, once it
+got its first-ever tests) `common` all got the identical bump. Only `eureka-server` remains
+deliberately untouched: none of these modules are runnable services it shares a JAR with, so
+there's no cross-module coupling to the version bump — if it ever gets its own test suite, expect
+to hit the same overrides. Two follow-on overrides were needed on every bumped module to make the
+JDK on this machine (21) actually work with the upgraded test stack: `mockito.version` (Boot 2.2's
+managed Mockito predates JDK 17+ bytecode support) and, less obviously, `byte-buddy.version`
+(Boot's BOM otherwise still pins byte-buddy to a version too old for the overridden Mockito, which
+fails at mock-creation time with `NoClassDefFoundError`, not at build time). `common` also lost
+its `spring-snapshots` repository declaration in the bump — it depended on it only for
+`Finchley.BUILD-SNAPSHOT`, a moving-target snapshot train that `Hoxton.SR12` (a real release)
+doesn't need.
 
 ### Naming and package quirks to know about
 
