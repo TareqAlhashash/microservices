@@ -135,6 +135,7 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 | `invoice-service` | 8400 | Generates an invoice on successful payment |
 | `notification-service` | 8500 | Emails (mocked) the customer, closes the saga |
 | `common` | n/a | Shared DTOs, events, error handling (not a service) |
+| Kafka | 9092 | Event bus for the purchase-flow saga (`docker compose up -d`, not a service) |
 
 ## What's covered, honestly
 
