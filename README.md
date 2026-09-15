@@ -55,7 +55,10 @@ graph TB
 
 ### Containers, event-driven purchase flow
 
-Choreographed over Kafka (arrows are topics, not direct calls); see [ADR-005](docs/adr/005-event-driven-choreography.md):
+Choreographed over Kafka, a single-node broker in KRaft mode (the `apache/kafka:3.7.0` Docker
+image, port 9092, started via `docker compose up -d`); no service calls another directly, they
+only publish/consume through it. See [ADR-005](docs/adr/005-event-driven-choreography.md) and
+[ADR-006](docs/adr/006-kafka-vs-queue.md):
 
 ```mermaid
 graph LR
@@ -63,19 +66,27 @@ graph LR
     PaymentSvc["payment-service :8300"]
     InvoiceSvc["invoice-service :8400"]
     NotifSvc["notification-service :8500"]
+    Kafka{{"Kafka :9092<br/>Docker, single-node KRaft"}}
     DB[(PostgreSQL<br/>own tables per service)]
 
-    OrderSvc -->|OrderPlaced| PaymentSvc
-    PaymentSvc -->|PaymentSucceeded| InvoiceSvc
-    PaymentSvc -.->|PaymentFailed: compensate| OrderSvc
-    InvoiceSvc -->|InvoiceIssued| NotifSvc
-    NotifSvc -->|OrderCompleted| OrderSvc
+    OrderSvc -->|order.placed| Kafka
+    Kafka -->|order.placed| PaymentSvc
+    PaymentSvc -->|payment.succeeded| Kafka
+    PaymentSvc -.->|payment.failed| Kafka
+    Kafka -->|payment.succeeded| InvoiceSvc
+    Kafka -.->|payment.succeeded / payment.failed<br/>invoice.issued / order.completed| OrderSvc
+    InvoiceSvc -->|invoice.issued| Kafka
+    Kafka -->|invoice.issued| NotifSvc
+    NotifSvc -->|order.completed| Kafka
 
     OrderSvc --- DB
     PaymentSvc --- DB
     InvoiceSvc --- DB
     NotifSvc --- DB
 ```
+
+`order-service` is the only consumer of four different topics (it tracks overall order status);
+every other service only consumes the single topic that triggers its own step.
 
 ## Highlights
 
