@@ -1,10 +1,11 @@
 # InvestorBook
 
 A Spring Cloud microservices demo — service discovery (Eureka), an OAuth2/JWT authorization
-server, an API gateway, and a member-profile service with S3-backed picture upload — modeling a
-social network for investors. Five independently deployable services plus a shared library, no
-parent POM, each built and run on its own. See [`CLAUDE.md`](CLAUDE.md) for the full architecture,
-security model, and per-module quirks.
+server, an API gateway, a member-profile service with S3-backed picture upload, and a
+choreographed, event-driven purchase saga over Kafka — modeling a social network for investors.
+Nine independently deployable modules plus a shared library, no parent POM, each built and run on
+its own. See [`CLAUDE.md`](CLAUDE.md) for the full architecture, security model, and per-module
+quirks.
 
 This was a working prototype with no tests. This README is about what changed and how.
 
@@ -153,12 +154,41 @@ secrets manager (AWS Secrets Manager, HashiCorp Vault, or a Kubernetes `Secret` 
 env var), rotated independently of a deploy, and the RSA keypair itself would be generated per
 environment rather than the same demo pair checked into five `application.properties` files.
 
+## Event-driven purchase flow
+
+The next addition after hardening the four core services: a choreographed saga (order-service →
+payment-service → invoice-service → notification-service, each reacting only to the event before
+it, no central coordinator) over Kafka, demonstrating the distributed-systems concepts the rest of
+the repo doesn't touch:
+
+- **A real compensating action, not just a happy-path chain.** A declined (mocked, deterministic)
+  payment publishes `PaymentFailed`, and `order-service` cancels the order rather than leaving it
+  stuck. That's the difference between an event chain and an actual saga — a reviewer will ask
+  "what happens when payment fails after the order is placed," and there's a real, tested answer.
+- **Idempotent consumers, two different ways.** `order-service` already has an order's status to
+  guard on, so a redelivered event that would repeat an already-applied transition is just a
+  no-op. The other three services don't have that state, so each keeps its own `processed_events`
+  table keyed by event id instead. Both are proven against a real *duplicate delivery* in tests,
+  not asserted from the design alone.
+- **Eventual consistency, stated plainly.** There's a real window where an order is `PLACED` but
+  not yet `PAID` — that's correct for this domain, not a bug to hide.
+- Payment and email are both deliberately mocked (a threshold-based decision, and `GreenMail` — a
+  fake SMTP server — in tests instead of a real mail relay) so the thing being demonstrated is the
+  event-driven orchestration itself, not a payment or email integration.
+
+See `CLAUDE.md`'s "Event-driven purchase flow" section for the full design (topics, event
+payloads, the `Persistable`-with-`isNew()`-true trick the dedupe tables need, and a real
+Testcontainers gotcha — `KafkaContainer` defaults to embedded-Zookeeper mode and needs
+`.withKraft()` called explicitly, or every client disconnects about 10 seconds in).
+
 ## What's covered, and what honestly isn't
 
-- **Tested**: `member-service`, `auth-service`, `resource-service`, `api-gateway`, and the shared
-  `common` library — unit tests, real Postgres/S3 (Testcontainers/LocalStack) integration tests,
-  full HTTP+security end-to-end tests, and (for `member-service`) a circuit-breaker integration
-  test. `mvn verify` is green on all five.
+- **Tested**: every module except `eureka-server` — `member-service`, `auth-service`,
+  `resource-service`, `api-gateway`, the shared `common` library, and all four purchase-flow
+  services (`order-service`, `payment-service`, `invoice-service`, `notification-service`). Unit
+  tests, real Postgres/S3/Kafka (Testcontainers/LocalStack) integration tests, full HTTP+security
+  end-to-end tests, a circuit-breaker integration test (`member-service`), and a real-SMTP-via-
+  GreenMail integration test (`notification-service`). `mvn verify` is green on all nine.
 - **Not tested**: `eureka-server` only — it's the naming server with no custom logic of its own,
   so there's nothing here to write a meaningful test against.
 - **Security scan**: SpotBugs/FindSecBugs is wired into every tested module's `mvn verify` and
@@ -169,9 +199,9 @@ environment rather than the same demo pair checked into five `application.proper
 - **No CI yet.** Nothing here has run anywhere but this machine.
 - **Demo-scale, not production-scale, on purpose**: one Postgres instance shared by every service
   that needs one (no per-service database isolation), a single hardcoded demo RSA keypair
-  (env-overridable, but the same pair ships as everyone's fallback), and no message
-  broker/event-driven flow yet (that's planned next, as a separate purchase-flow subsystem, before
-  this repo gets documented with ADRs and C4 diagrams).
+  (env-overridable, but the same pair ships as everyone's fallback), no real payment or email
+  integration (both mocked, by design — see above), and no C4 diagrams or ADRs yet (deliberately
+  next, now that there's a system worth documenting rather than a thin demo).
 
 ## Running it
 

@@ -1,0 +1,68 @@
+package com.investorbook.notificationservice.service;
+
+import java.time.Instant;
+import java.util.UUID;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.common.event.OrderCompleted;
+import com.investorbook.common.event.Topics;
+import com.investorbook.notificationservice.dao.ProcessedEventRepository;
+import com.investorbook.notificationservice.dao.entities.ProcessedEvent;
+
+@Component
+public class NotificationEventListener {
+
+	private static final Logger logger = LoggerFactory.getLogger(NotificationEventListener.class);
+
+	private final ProcessedEventRepository processedEventRepository;
+	private final NotificationEmailSender emailSender;
+	private final KafkaTemplate<String, Object> kafkaTemplate;
+
+	public NotificationEventListener(ProcessedEventRepository processedEventRepository,
+			NotificationEmailSender emailSender, KafkaTemplate<String, Object> kafkaTemplate) {
+		this.processedEventRepository = processedEventRepository;
+		this.emailSender = emailSender;
+		this.kafkaTemplate = kafkaTemplate;
+	}
+
+	@KafkaListener(topics = Topics.INVOICE_ISSUED, groupId = "notification-service")
+	@Transactional
+	public void onInvoiceIssued(InvoiceIssued event) {
+		if (alreadyProcessed(event.getEventId())) {
+			logger.info("ignoring redelivered InvoiceIssued event {}", event.getEventId());
+			return;
+		}
+
+		// The completion email is a best-effort side channel, not a gate on the
+		// saga completing: no real mail server is configured outside tests (see
+		// NotificationEmailSender), so failing to send shouldn't leave every order
+		// stuck at INVOICED forever in a normal local run.
+		try {
+			emailSender.sendCompletionEmail(event);
+		} catch (Exception e) {
+			logger.warn("failed to send completion email for order {}: {}", event.getOrderId(), e.toString());
+		}
+
+		kafkaTemplate.send(Topics.ORDER_COMPLETED, event.getOrderId(),
+				new OrderCompleted(UUID.randomUUID().toString(), event.getOrderId(), event.getCustomerEmail(),
+						Instant.now()));
+	}
+
+	/** See payment-service's ProcessedEvent for why this needs saveAndFlush, not save. */
+	private boolean alreadyProcessed(String eventId) {
+		try {
+			processedEventRepository.saveAndFlush(new ProcessedEvent(eventId, Instant.now()));
+			return false;
+		} catch (DataIntegrityViolationException e) {
+			return true;
+		}
+	}
+}
