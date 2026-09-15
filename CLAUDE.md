@@ -52,6 +52,7 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 | `resource-service` | **1 unit test, no Docker** | +4 integration tests, no Docker needed | See below |
 | `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
 | `order-service` | **9 unit tests, no Docker** | +4 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `payment-service` | **3 unit tests, no Docker** | +3 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 
 #### Shared error handling (common lib) — a real bug found while wiring it in
 
@@ -426,8 +427,8 @@ doesn't need.
 Phase 2.5 (built after the core services were hardened, before the C4/ADR documentation phase):
 a choreographed saga on top of the same Eureka/OAuth2 stack, demonstrating event-driven
 architecture, eventual consistency, and idempotent consumers — the distributed-systems concepts
-the rest of this repo doesn't touch. **`order-service` is the only one built so far**; `payment-service`,
-`invoice-service`, and `notification-service` are still to come (see the plan this was built from
+the rest of this repo doesn't touch. **`order-service` and `payment-service` are built so far**;
+`invoice-service` and `notification-service` are still to come (see the plan this was built from
 for the full design). Update this section as each one lands.
 
 ### The flow
@@ -447,6 +448,12 @@ order-service --OrderPlaced--> payment-service --PaymentSucceeded--> invoice-ser
 `InvoiceIssued`, `OrderCompleted`) to advance its own order's status: `PLACED` → `PAID` →
 `INVOICED` → `COMPLETED`, or `PLACED` → `PAYMENT_FAILED` on the compensating path. See
 `OrderStatus` for the full state enum.
+
+`payment-service` has no REST API of its own - it only reacts to Kafka. Its `PaymentEventListener`
+consumes `OrderPlaced` and makes a **mocked, deterministic** decision: orders at or above
+`PaymentEventListener.DECLINE_THRESHOLD` ($1000.00, simulating a simple risk/fraud threshold) get
+`PaymentFailed`; everything else gets `PaymentSucceeded`. The point is the event-driven
+orchestration and the saga's failure path, not a real payment integration.
 
 ### Shared pieces (in `common`)
 
@@ -469,10 +476,22 @@ order-service --OrderPlaced--> payment-service --PaymentSucceeded--> invoice-ser
   (`OrderEventListener`) only applies its transition when the order's *current* status matches the
   expected predecessor (e.g. `PAID → INVOICED` only fires if the order is currently `PAID`); a
   redelivered event finds the order already past that point and is a silent no-op. This works
-  because `order-service` already has rich state to guard on - the other three (planned) services
-  don't, and will need an actual `processed_events`-style dedupe table instead once built.
-- Proven by `OrderServiceApiIT.aRedeliveredPaymentSucceeded_doesNotDoubleProcess`, which sends the
+  because `order-service` already has rich state to guard on.
+  Proven by `OrderServiceApiIT.aRedeliveredPaymentSucceeded_doesNotDoubleProcess`, which sends the
   same `PaymentSucceeded` twice and asserts the order settles on `PAID` and stays there.
+- **`payment-service`, `invoice-service`, `notification-service`**: a dedicated
+  `processed_events` dedupe table (one per service, since each keeps its own), keyed by event id.
+  Unlike `order-service`, these have no other state to guard on. The table's entity
+  (`ProcessedEvent`) implements Spring Data's `Persistable` with `isNew()` hardcoded to `true` -
+  without that, `save()` on an entity with an already-populated `@Id` does a merge (update-if-
+  exists) rather than an insert, which would silently succeed on a duplicate id instead of
+  surfacing the constraint violation this table exists to catch. The insert is flushed immediately
+  (`saveAndFlush`, not deferred to end-of-transaction) so the duplicate is caught *before* any
+  Kafka send - Kafka isn't transactional with this database, so a message already sent can't be
+  un-sent if the DB write is later found to conflict.
+  Proven by `PaymentServiceIT.aRedeliveredOrderPlaced_resultsInOnlyOnePaymentSucceeded`, which
+  publishes the same `OrderPlaced` (same event id) twice and asserts only one `PaymentSucceeded`
+  comes out.
 
 ### Local infra and testing
 
@@ -491,8 +510,9 @@ match how the local docker-compose Kafka runs.
 `OrderServiceApiIT` covers: the happy path all the way to `COMPLETED` (order-service's own
 producer and consumer sides — `payment-service`/`invoice-service`/`notification-service` aren't
 running in this test, so it publishes their events itself, standing in for them; each of those
-services proves its own reaction to its trigger event in its own suite once built, which together
-prove the same chain without one fragile multi-service-in-one-JVM test), the compensating path
+services proves its own reaction to its trigger event in its own suite instead - `PaymentServiceIT`
+is the first example, proving `payment-service`'s reaction to `OrderPlaced` - which together prove
+the same chain without one fragile multi-service-in-one-JVM test), the compensating path
 (`PaymentFailed` → `PAYMENT_FAILED`), idempotency (above), and that `OrderPlaced` is actually
 published with the order id as the Kafka key. Two Kafka-test-API gotchas worth knowing if you
 write another one of these: `KafkaTestUtils.getRecords(consumer, timeout)` takes a `long`
