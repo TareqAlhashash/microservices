@@ -53,6 +53,11 @@ graph TB
     Resource -.->|register/discover| Eureka
 ```
 
+Zuul and Eureka (Netflix OSS) are both in maintenance mode; they're kept here because they're what
+the original code used. A new microservices system built today would use Spring Cloud Gateway and
+Kubernetes-native discovery (DNS-based Service resolution) instead; see
+[ADR-001](docs/adr/001-service-discovery-and-gateway.md) for the full reasoning.
+
 ### Containers, event-driven purchase flow
 
 Choreographed over Kafka, a single-node broker in KRaft mode (the `apache/kafka:3.7.0` Docker
