@@ -11,9 +11,9 @@ per-endpoint field docs for planned features live in `api-gateway/requirements-m
 checking for other references).
 
 Five independently deployable Maven modules plus one shared library, each with its own `pom.xml`.
-There is no parent/reactor POM — modules are built and run separately, and **`member-service` and
-`auth-service` have been upgraded and given test coverage** (see below); the other three are still
-exactly as originally generated.
+There is no parent/reactor POM — modules are built and run separately, and **`member-service`,
+`auth-service`, and `resource-service` have been upgraded and given test coverage** (see below);
+`api-gateway` and `eureka-server` are still exactly as originally generated.
 
 ## Commands
 
@@ -46,7 +46,7 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 | `auth-service` | **5 unit tests, no Docker** | +7 integration tests, **needs Docker** | See below |
 | `api-gateway` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
 | `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
-| `resource-service` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
+| `resource-service` | **1 unit test, no Docker** | +3 integration tests, no Docker needed | See below |
 | `common` | nothing to run | nothing to run | Library, no tests |
 
 #### member-service: unit vs. integration tests, and Docker
@@ -112,10 +112,33 @@ Security's own Basic-auth entry point rejects an unrecognized client before OAut
 rendering runs) for an unknown client; `token_key` being publicly readable; and `check_token`
 requiring a trusted client's credentials.
 
+#### resource-service: same Boot bump, no JDK 21 test workaround needed
+
+`resource-service` got the same Boot 2.0.2 → 2.2.13 / Hoxton.SR12 bump, replacing its single
+generated JUnit 4 `contextLoads()` smoke test (which hit the cglib failure documented below).
+Unlike `auth-service`, it's a plain `@EnableResourceServer` (not an authorization server), so it
+never builds the JAXB-based error converter and needs no `--add-opens` at all — `mvn test`/`mvn
+verify` just work. One catch the bump surfaced: Hoxton's `spring-cloud-starter-security` no longer
+pulls `spring-security-oauth2` transitively (member-service gets it via the `common` lib instead;
+this module doesn't depend on `common`), so `spring-cloud-starter-oauth2` had to be added directly,
+matching what `auth-service` already declares — without it, `JwtConvertor.java`'s existing
+`OAuth2Authentication`/`DefaultAccessTokenConverter` usage doesn't even compile under Hoxton.
+
+`ResourceServiceApiIT` mints JWTs against a test signing key (no real dependency to exercise via
+Testcontainers here) and proves the actual filter chain: no token → 401, a valid token without
+`ROLE_MEMBER` → 403 (`@PreAuthorize` actually enforced, not just present in source), a valid token
+with the role → 200. `JwtConvertorTest` covers the claims-map-as-details behaviour `JwtUtil.getEmail`
+relies on downstream (see member-service's `MemberServiceController`).
+
+```bash
+cd resource-service && mvn test                                 # 1 test, seconds, no Docker
+cd resource-service && mvn verify                                # +3 integration tests, no Docker needed
+```
+
 #### JDK 21 incompatibility in the untouched services
 
-`api-gateway`, `eureka-server`, and `resource-service` each fail their single generated
-`contextLoads()` smoke test on this JDK with the same root cause:
+`api-gateway` and `eureka-server` still fail their single generated `contextLoads()` smoke test on
+this JDK with the same root cause:
 
 ```
 IllegalStateException: Cannot load configuration class: PropertySourceBootstrapConfiguration
@@ -129,9 +152,10 @@ Spring 5.0.6 (pulled in by Boot 2.0.2) generates cglib proxies via reflection on
 `ClassLoader.defineClass`, which the JPMS module system blocks from Java 16 onward without an
 explicit `--add-opens`. A quick `-DargLine="--add-opens java.base/java.lang=ALL-UNNAMED"` did
 **not** resolve it in a direct check — this needs either JDK 8/11 (what Boot 2.0.2 actually
-targets and was never validated past) or the same kind of Boot version bump `member-service` and
-`auth-service` got (see "Why member-service and auth-service are on a different Boot version").
-Confirmed by actually running each module's tests, not inferred from the version number alone.
+targets and was never validated past) or the same kind of Boot version bump `member-service`,
+`auth-service`, and `resource-service` got (see "Why member-service, auth-service, and
+resource-service are on a different Boot version"). Confirmed by actually running each module's
+tests, not inferred from the version number alone.
 
 ### Running the full system locally
 
@@ -226,20 +250,20 @@ works end-to-end (401 with no token, 404 with a valid token and no matching acco
 enforced) by minting a JWT directly against a test signing key — see that test's class Javadoc for
 why it doesn't depend on `auth-service` being up.
 
-### Why member-service and auth-service are on a different Boot version
+### Why member-service, auth-service, and resource-service are on a different Boot version
 
 `member-service` was bumped from Spring Boot 2.0.2 to **2.2.13** (Spring Cloud `Hoxton.SR12`)
 specifically to get JUnit 5 as the default in `spring-boot-starter-test`, before any test suite was
 written for it — Boot 2.0.2's bundled Surefire (2.21.0) predates JUnit Platform support entirely.
-`auth-service` later got the identical bump for the same reason. `api-gateway`, `eureka-server`,
-and `resource-service` were deliberately left untouched: they only interoperate over REST/Eureka,
-never a shared JAR, so there's no cross-module coupling to the version bump — if they ever get
-their own test suites, expect to hit the same overrides. Two follow-on overrides were needed on
-both bumped modules to make the JDK on this machine (21) actually work with the upgraded test
-stack: `mockito.version` (Boot 2.2's managed Mockito predates JDK 17+ bytecode support) and, less
-obviously, `byte-buddy.version` (Boot's BOM otherwise still pins byte-buddy to a version too old
-for the overridden Mockito, which fails at mock-creation time with `NoClassDefFoundError`, not at
-build time).
+`auth-service` and `resource-service` later got the identical bump for the same reason. `api-gateway`
+and `eureka-server` remain deliberately untouched: all five modules only interoperate over
+REST/Eureka, never a shared JAR, so there's no cross-module coupling to the version bump — if the
+remaining two ever get their own test suites, expect to hit the same overrides. Two follow-on
+overrides were needed on every bumped module to make the JDK on this machine (21) actually work
+with the upgraded test stack: `mockito.version` (Boot 2.2's managed Mockito predates JDK 17+
+bytecode support) and, less obviously, `byte-buddy.version` (Boot's BOM otherwise still pins
+byte-buddy to a version too old for the overridden Mockito, which fails at mock-creation time with
+`NoClassDefFoundError`, not at build time).
 
 ### Naming and package quirks to know about
 
@@ -250,4 +274,7 @@ build time).
   intentional-looking but easy to typo again when adding files there.
 - `auth-service` and `member-service` each define their own `MemberEntity` mapped to the same
   `members` table with different column subsets — by design (auth only needs id/email/password
-  hash), not a duplication bug to merge.
+  hash), not a duplication bug to merge. `auth-service`'s `MemberEntity` has no `@GeneratedValue`
+  on its `String id`, and until `AuthServiceTokenIT` needed to seed one, there was no way to
+  construct a persistable instance at all — the 3-arg constructor `(id, email, passwordHash)` was
+  added for that.
