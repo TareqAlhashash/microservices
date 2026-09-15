@@ -124,6 +124,14 @@
     <text x="476" y="894" text-anchor="middle" font-size="12" fill="#687078">broker 1</text>
   </g>
 
+  <!-- ElastiCache Redis (primary) -->
+  <g>
+    <rect x="346" y="800" width="64" height="64" rx="10" fill="#A41E11"/>
+    <path d="M380,812 L366,834 L375,834 L371,854 L392,826 L379,826 Z" fill="#ffffff"/>
+    <text x="378" y="878" text-anchor="middle" font-size="13" fill="#16191f">ElastiCache</text>
+    <text x="378" y="894" text-anchor="middle" font-size="12" fill="#687078">Redis cache</text>
+  </g>
+
   <!-- RDS Standby -->
   <g>
     <rect x="783" y="800" width="64" height="64" rx="10" fill="#2E73B8" opacity="0.7"/>
@@ -140,17 +148,33 @@
     <text x="1011" y="894" text-anchor="middle" font-size="12" fill="#687078">broker 2</text>
   </g>
 
+  <!-- ElastiCache Redis (replica) -->
+  <g>
+    <rect x="881" y="800" width="64" height="64" rx="10" fill="#A41E11" opacity="0.7"/>
+    <path d="M915,812 L901,834 L910,834 L906,854 L927,826 L914,826 Z" fill="#ffffff"/>
+    <text x="913" y="878" text-anchor="middle" font-size="13" fill="#16191f">ElastiCache</text>
+    <text x="913" y="894" text-anchor="middle" font-size="12" fill="#687078">Redis replica</text>
+  </g>
+
   <!-- ECS A -> RDS Primary / MSK 1 -->
   <path d="M357,704 L357,750 L280,750 L280,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
   <text x="318" y="762" text-anchor="middle" font-size="11" fill="#687078">JDBC</text>
   <path d="M401,704 L401,750 L476,750 L476,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
   <text x="438" y="762" text-anchor="middle" font-size="11" fill="#687078">Kafka</text>
 
+  <!-- ECS A -> ElastiCache Redis (primary) -->
+  <path d="M378,704 L378,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="378" y="762" text-anchor="middle" font-size="11" fill="#687078">cache</text>
+
   <!-- ECS B -> RDS Standby / MSK 2 -->
   <path d="M892,704 L892,750 L815,750 L815,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
   <text x="853" y="762" text-anchor="middle" font-size="11" fill="#687078">JDBC</text>
   <path d="M934,704 L934,750 L1011,750 L1011,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
   <text x="972" y="762" text-anchor="middle" font-size="11" fill="#687078">Kafka</text>
+
+  <!-- ECS B -> ElastiCache Redis (replica) -->
+  <path d="M913,704 L913,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="913" y="762" text-anchor="middle" font-size="11" fill="#687078">cache</text>
 
   <!-- Shared AWS services row (drawn before the labels below so their white backgrounds mask it cleanly) -->
   <path d="M410,672 L649,672 L649,1108" stroke="#555555" stroke-width="1.3" fill="none"/>
