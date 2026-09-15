@@ -81,10 +81,10 @@
   <text x="700" y="600" font-size="12" fill="#8C4FFF">Private subnet B</text>
 
   <!-- ALB -> ECS -->
-  <path d="M650,482 L378,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <path d="M650,482 L913,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <rect x="565" y="493" width="170" height="16" fill="#ffffff"/>
-  <text x="650" y="505" text-anchor="middle" font-size="11" fill="#687078">forwards to api-gateway task</text>
+  <path d="M650,482 L650,515 L378,515 L378,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <path d="M650,482 L650,515 L913,515 L913,636" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <rect x="565" y="487" width="170" height="16" fill="#ffffff"/>
+  <text x="650" y="499" text-anchor="middle" font-size="11" fill="#687078">forwards to api-gateway task</text>
 
   <!-- ECS A -->
   <g>
@@ -141,16 +141,16 @@
   </g>
 
   <!-- ECS A -> RDS Primary / MSK 1 -->
-  <path d="M357,700 L295,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="290" y="765" font-size="11" fill="#687078">JDBC</text>
-  <path d="M401,700 L461,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="435" y="765" font-size="11" fill="#687078">Kafka</text>
+  <path d="M357,704 L357,750 L280,750 L280,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="318" y="762" text-anchor="middle" font-size="11" fill="#687078">JDBC</text>
+  <path d="M401,704 L401,750 L476,750 L476,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="438" y="762" text-anchor="middle" font-size="11" fill="#687078">Kafka</text>
 
   <!-- ECS B -> RDS Standby / MSK 2 -->
-  <path d="M892,700 L830,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="790" y="765" font-size="11" fill="#687078">JDBC</text>
-  <path d="M936,700 L996,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
-  <text x="965" y="765" font-size="11" fill="#687078">Kafka</text>
+  <path d="M892,704 L892,750 L815,750 L815,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="853" y="762" text-anchor="middle" font-size="11" fill="#687078">JDBC</text>
+  <path d="M934,704 L934,750 L1011,750 L1011,796" stroke="#555555" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="972" y="762" text-anchor="middle" font-size="11" fill="#687078">Kafka</text>
 
   <!-- Shared AWS services row (drawn before the labels below so their white backgrounds mask it cleanly) -->
   <path d="M410,672 L649,672 L649,1160" stroke="#555555" stroke-width="1.3" fill="none"/>
