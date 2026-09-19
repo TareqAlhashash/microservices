@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted.
+Accepted. Extended by [ADR-010](010-compensation-after-payment.md), which adds compensation for the
+steps after payment. The "only one compensating action" reasoning below describes the flow as it
+was when this was written.
 
 ## Context
 

@@ -54,10 +54,10 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 | `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
 | `resource-service` | **1 unit test, no Docker** | +4 integration tests, no Docker needed | See below |
 | `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
-| `order-service` | **9 unit tests, no Docker** | +4 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
-| `payment-service` | **3 unit tests, no Docker** | +3 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
-| `invoice-service` | **2 unit tests, no Docker** | +2 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
-| `notification-service` | **3 unit tests, no Docker** | +2 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `order-service` | **17 unit tests, no Docker** | +7 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `payment-service` | **7 unit tests, no Docker** | +6 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `invoice-service` | **8 unit tests, no Docker** | +5 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
+| `notification-service` | **10 unit tests, no Docker** | +3 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 
 #### Shared error handling (common lib) — a real bug found while wiring it in
 
@@ -444,6 +444,11 @@ instead of "fixing":
   by re-running with only that one fix in place. FindSecBugs' taint tracker doesn't verify custom
   sanitizer methods through the varargs logging overload specifically; the value passed is
   provably always the sanitized one, so this one is a suppressed false positive, not a live risk.
+- **Another taint-tracker quirk, this one worked around instead of suppressed**: FindSecBugs treats
+  *every* value read off a Kafka event as tainted, `BigDecimal` included, so logging an event's
+  `amount` in `payment-service`'s `refund` tripped `CRLF_INJECTION_LOGS` (a `BigDecimal` cannot
+  hold a CR/LF; the finding is spurious). The fix is cheap and needs no suppression entry: log
+  `sanitizeForLog(amount.toPlainString())` instead of the raw `BigDecimal`.
 
 Confirmed by actually running `mvn verify` on all nine modules after every fix — including
 re-running `member-service` (unchanged, but `common` moved under it) and reinstalling `common`
@@ -499,43 +504,88 @@ coordinator, each service reacts only to the event before it:
 
 ```
 order-service --OrderPlaced--> payment-service --PaymentSucceeded--> invoice-service --InvoiceIssued--> notification-service --OrderCompleted--> order-service
-                                       \--PaymentFailed--> order-service (compensating: PAYMENT_FAILED)
+                                       \--PaymentFailed--> order-service (PAYMENT_FAILED, nothing was charged so nothing to undo)
 ```
 
-`order-service` also consumes the three terminal events (`PaymentSucceeded`/`PaymentFailed`,
-`InvoiceIssued`, `OrderCompleted`) to advance its own order's status: `PLACED` → `PAID` →
-`INVOICED` → `COMPLETED`, or `PLACED` → `PAYMENT_FAILED` on the compensating path. See
-`OrderStatus` for the full state enum.
+`order-service` also consumes the terminal events (`PaymentSucceeded`/`PaymentFailed`,
+`InvoiceIssued`, `OrderCompleted`, `PaymentRefunded`) to advance its own order's status: `PLACED`
+→ `PAID` → `INVOICED` → `COMPLETED`, or `PLACED` → `PAYMENT_FAILED` when payment is declined, or
+`PLACED`/`PAID`/`INVOICED` → `CANCELLED` once a refund has happened. See `OrderStatus` for the full
+state enum.
+
+### Compensation (what "reverting a step" means here)
+
+Kafka events are immutable and Kafka isn't transactional with any of the databases, so nothing is
+ever rolled back or un-published. A failing step publishes a failure event, and the service that
+owns the effect to undo reacts to it, in reverse order of the original steps. Two chains cover
+every step after payment (see [ADR-010](docs/adr/010-compensation-after-payment.md)):
+
+```
+invoice-service fails    InvoiceFailed -----------------------------> payment-service refunds --PaymentRefunded--> order CANCELLED
+notification fails       NotificationFailed --> invoice-service voids --InvoiceVoided--> payment-service refunds --PaymentRefunded--> order CANCELLED
+```
+
+`payment-service` is the single refund point (`onInvoiceFailed`/`onInvoiceVoided` both end in
+`PaymentEventListener.refund`); the refund itself is mocked, like the charge. The new topics are
+`invoice.failed`, `notification.failed`, `invoice.voided`, `payment.refunded`. The failure
+triggers are mocked and deterministic so each chain is demonstrable:
+
+- **Invoice fails**: amount at or above `InvoiceEventListener.INVOICE_LIMIT` ($500.00, simulating a
+  manual tax-review rule). Deliberately below payment's $1000.00 decline threshold, so an order in
+  $500 to $999.99 is charged, fails to invoice, and gets refunded. No `Invoice` row is created.
+- **Notification fails**: the customer's address can never receive mail (null, no `@`, or more
+  than one address), which `NotificationEmailSender` reports as `UndeliverableRecipientException`.
+  A mail *server* problem is still best-effort (logged, order still completes); only the
+  never-retryable case is a saga failure.
+- **Voiding an invoice** sets a nullable `voided_at` on the `Invoice` row (`isVoided()`); an
+  already-voided invoice publishes nothing further, so a refund is never triggered twice.
+- **`order-service` accepts `CANCELLED` from `PLACED`, `PAID`, or `INVOICED`**, not just the
+  expected predecessor: the refund travels through several topics while the order's own
+  `PaymentSucceeded`/`InvoiceIssued` arrive on others, with no cross-topic ordering, so the cancel
+  can arrive first. A late `PaymentSucceeded`/`InvoiceIssued` afterwards finds `CANCELLED` and is
+  ignored.
+- **Not handled** (named in ADR-010): a compensation that itself fails has no retry or dead-letter
+  topic; `CANCELLED` doesn't store the reason; the customer isn't told about a cancellation.
+
+Every listener logs each stage in plain words: `saga:` on the forward path (for example
+"payment captured, publishing PaymentSucceeded") and `compensation:` on the undo path ("payment of
+600.00 for order X has to be refunded", "payment ... refunded, published PaymentRefunded", "invoice
+... voided, void invoice sent"), so one order's whole story can be followed in the logs.
 
 `payment-service` has no REST API of its own - it only reacts to Kafka. Its `PaymentEventListener`
 consumes `OrderPlaced` and makes a **mocked, deterministic** decision: orders at or above
 `PaymentEventListener.DECLINE_THRESHOLD` ($1000.00, simulating a simple risk/fraud threshold) get
-`PaymentFailed`; everything else gets `PaymentSucceeded`. The point is the event-driven
-orchestration and the saga's failure path, not a real payment integration.
+`PaymentFailed`; everything else gets `PaymentSucceeded`. It also consumes `InvoiceFailed` and
+`InvoiceVoided` and answers each with `PaymentRefunded`. The point is the event-driven
+orchestration and the saga's failure paths, not a real payment integration.
 
 `invoice-service` also has no REST API - `InvoiceEventListener` consumes `PaymentSucceeded`,
 persists a real `Invoice` row (`invoiceNumber` is just `"INV-" + 8 random hex chars`, not a
 real sequential numbering scheme - a demo simplification worth naming if asked), and publishes
-`InvoiceIssued`.
+`InvoiceIssued` (or `InvoiceFailed`, above the invoicing limit). It also consumes
+`NotificationFailed`, voids the invoice, and publishes `InvoiceVoided`.
 
 `notification-service` also has no REST API - `NotificationEventListener` consumes
 `InvoiceIssued`, sends a completion email via `NotificationEmailSender` (real `JavaMailSender`
 code with a text-file invoice attachment built inline from the event's own fields, not fetched
 from `invoice-service`), and publishes `OrderCompleted`. `spring.mail.host`/`port` default to a
 harmless `localhost:2525` placeholder that nothing listens on in a normal local run - **no real
-mail server is ever wired in, by design** (see the plan this was built from). The email send is
-wrapped in a try/catch that only logs a warning on failure: it's a best-effort side channel, not
-a gate on the saga completing, specifically so a normal local run (no SMTP server configured)
-doesn't leave every order stuck at `INVOICED` forever. Tests point `spring.mail.port` at
-GreenMail (a fake SMTP server) instead, so the real sending code is genuinely exercised, not
-bypassed - see `NotificationServiceIT`.
+mail server is ever wired in, by design** (see the plan this was built from). A send failure
+other than an undeliverable address is caught and only logs a warning: it's a best-effort side
+channel, not a gate on the saga completing, specifically so a normal local run (no SMTP server
+configured) doesn't leave every order stuck at `INVOICED` forever. An undeliverable address is the
+one exception and publishes `NotificationFailed` instead of `OrderCompleted` (see "Compensation"
+above). Tests point `spring.mail.port` at GreenMail (a fake SMTP server) instead, so the real
+sending code is genuinely exercised, not bypassed - see `NotificationServiceIT`.
 
 ### Shared pieces (in `common`)
 
-- `com.investorbook.common.event`: the five event classes (`OrderPlaced`, `PaymentSucceeded`,
-  `PaymentFailed`, `InvoiceIssued`, `OrderCompleted`) plus `Topics` (the topic-name constants,
+- `com.investorbook.common.event`: the nine event classes (`OrderPlaced`, `PaymentSucceeded`,
+  `PaymentFailed`, `InvoiceIssued`, `OrderCompleted`, plus the four compensation events
+  `InvoiceFailed`, `NotificationFailed`, `InvoiceVoided`, `PaymentRefunded`) plus `Topics` (the topic-name constants,
   one topic per event type — `order.placed`, `payment.succeeded`, `payment.failed`,
-  `invoice.issued`, `order.completed`). Every producer sends keyed by order id
+  `invoice.issued`, `order.completed`, `invoice.failed`, `notification.failed`, `invoice.voided`,
+  `payment.refunded`). Every producer sends keyed by order id
   (`kafkaTemplate.send(topic, orderId, event)`), so all events for one order land in the same
   partition and keep their relative order — this saga needs per-order ordering, not a global one.
   Every field an event carries is deliberately denormalized (e.g. `customerEmail`/`amount` repeated
@@ -591,11 +641,18 @@ producer and consumer sides — `payment-service`/`invoice-service`/`notificatio
 running in this test, so it publishes their events itself, standing in for them; each of those
 services proves its own reaction to its trigger event in its own suite instead - `PaymentServiceIT`,
 `InvoiceServiceIT`, and `NotificationServiceIT` - which together prove the same chain without one
-fragile multi-service-in-one-JVM test), the compensating path
-(`PaymentFailed` → `PAYMENT_FAILED`), idempotency (above), and that `OrderPlaced` is actually
+fragile multi-service-in-one-JVM test), the compensating paths
+(`PaymentFailed` → `PAYMENT_FAILED`, and `PaymentRefunded` → `CANCELLED` from both `PAID` and
+`INVOICED`, plus a redelivered refund), idempotency (above), and that `OrderPlaced` is actually
 published with the order id as the Kafka key. Two Kafka-test-API gotchas worth knowing if you
 write another one of these: `KafkaTestUtils.getRecords(consumer, timeout)` takes a `long`
 milliseconds, not a `Duration`; and its sibling `getSingleRecord` throws if more than one record
 for the topic exists — fine for a topic only one test touches, wrong here since every test method
 in this class calls the same `placeOrder()` helper, so `order.placed` legitimately accumulates
 multiple records across the class's test run. Filter by key instead of assuming there's only one.
+
+One more gotcha in these four modules: a compile error in a *test* source file does not fail the
+build. It surfaces as a runtime `java.lang.Error: Unresolved compilation problem` inside the one
+test method that touches the bad line (for example a missing `throws` for a checked
+`MessagingException`), so a "green" class with one odd error means read the Surefire/Failsafe
+report under `target/` for that message before assuming the test logic is wrong.

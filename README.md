@@ -7,7 +7,7 @@ deployable modules plus a shared library, no parent POM.
 
 Started as an untested prototype that didn't compile from a clean checkout. Now: real
 integration tests (Testcontainers Postgres/Kafka, LocalStack S3), a hardened error/resilience
-layer, an event-driven saga with a real compensating action, and a clean security scan across
+layer, an event-driven saga with compensating actions for every step, and a clean security scan across
 every module. See [`CLAUDE.md`](CLAUDE.md) for full architecture detail, per-module quirks, and
 commands; [`docs/adr/`](docs/adr/) for the decisions behind it.
 
@@ -79,10 +79,15 @@ graph LR
     PaymentSvc -->|payment.succeeded| Kafka
     PaymentSvc -.->|payment.failed| Kafka
     Kafka -->|payment.succeeded| InvoiceSvc
-    Kafka -.->|payment.succeeded / payment.failed<br/>invoice.issued / order.completed| OrderSvc
+    Kafka -.->|payment.succeeded / payment.failed / payment.refunded<br/>invoice.issued / order.completed| OrderSvc
     InvoiceSvc -->|invoice.issued| Kafka
     Kafka -->|invoice.issued| NotifSvc
     NotifSvc -->|order.completed| Kafka
+    InvoiceSvc -.->|invoice.failed / invoice.voided| Kafka
+    NotifSvc -.->|notification.failed| Kafka
+    Kafka -.->|notification.failed| InvoiceSvc
+    Kafka -.->|invoice.failed / invoice.voided| PaymentSvc
+    PaymentSvc -.->|payment.refunded| Kafka
 
     OrderSvc --- DB
     PaymentSvc --- DB
@@ -90,8 +95,17 @@ graph LR
     NotifSvc --- DB
 ```
 
-`order-service` is the only consumer of four different topics (it tracks overall order status);
-every other service only consumes the single topic that triggers its own step.
+Dashed edges are the compensation paths. When a step after payment fails, the saga unwinds
+backwards instead of leaving the customer charged for an order that never completes:
+
+```
+invoice-service fails    InvoiceFailed -----------------------------> payment-service refunds --PaymentRefunded--> order CANCELLED
+notification fails       NotificationFailed --> invoice-service voids --InvoiceVoided--> payment-service refunds --PaymentRefunded--> order CANCELLED
+```
+
+`order-service` consumes five topics (it tracks overall order status), `payment-service` three
+(the order, plus the two events that mean a refund is due), `invoice-service` two, and
+`notification-service` one.
 
 ### Target AWS deployment
 
@@ -117,8 +131,10 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 - **A circuit breaker on a real failure mode**: member-service's signup callback to auth-service
   degrades gracefully (202, log in separately) instead of a 500, with a test proving the circuit
   actually opens and short-circuits, not just that one failure returns a fallback.
-- **A saga with a real compensating action**: a declined payment cancels the order rather than
-  leaving it stuck. See [ADR-008](docs/adr/008-saga-compensation.md).
+- **A saga with real compensating actions**: a declined payment cancels the order rather than
+  leaving it stuck, and a failure after payment (invoice not issued, customer unreachable) voids
+  the invoice, refunds the payment, and cancels the order. See
+  [ADR-008](docs/adr/008-saga-compensation.md) and [ADR-010](docs/adr/010-compensation-after-payment.md).
 - **Idempotent consumers, two different ways**, each proven against a real duplicate delivery.
   See [ADR-007](docs/adr/007-idempotency-strategy.md).
 - **A security scan that found real bugs**: wiring SpotBugs/FindSecBugs into every module (it was
@@ -135,9 +151,9 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 | `member-service` | 8100 | Signup, profile, S3 picture upload |
 | `resource-service` | 9200 | Template for a new protected service |
 | `api-gateway` | 8765 | Zuul edge router, the only externally-called service |
-| `order-service` | 8200 | Places orders, owns order status |
-| `payment-service` | 8300 | Mocked, deterministic payment decision |
-| `invoice-service` | 8400 | Generates an invoice on successful payment |
+| `order-service` | 8200 | Places orders, owns order status (including `CANCELLED` after a refund) |
+| `payment-service` | 8300 | Mocked, deterministic payment decision; refunds when a later step fails |
+| `invoice-service` | 8400 | Generates an invoice on successful payment; voids it if notification fails |
 | `notification-service` | 8500 | Emails (mocked) the customer, closes the saga |
 | `common` | n/a | Shared DTOs, events, error handling (not a service) |
 | Kafka | 9092 | Event bus for the purchase-flow saga (`docker compose up -d`, not a service) |

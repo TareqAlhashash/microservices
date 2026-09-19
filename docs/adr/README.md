@@ -14,3 +14,4 @@ downsides). These are demo-scale decisions, not claims of a production-perfect s
 | [007](007-idempotency-strategy.md) | Idempotent consumers, via two mechanisms depending on available state |
 | [008](008-saga-compensation.md) | A real compensating action on payment failure |
 | [009](009-aws-deployment-architecture.md) | Target AWS deployment: Fargate, Multi-AZ, MSK, CloudFront+WAF |
+| [010](010-compensation-after-payment.md) | Compensating actions for every saga step after payment: void the invoice, refund, cancel |
