@@ -28,6 +28,11 @@ public class Invoice {
 	@Column(name = "issued_at")
 	private Instant issuedAt;
 
+	// Nullable on purpose: null means the invoice is still valid, and it keeps rows that
+	// predate this column valid under ddl-auto=update.
+	@Column(name = "voided_at")
+	private Instant voidedAt;
+
 	public Invoice() {
 		super();
 	}
@@ -54,6 +59,18 @@ public class Invoice {
 
 	public BigDecimal getAmount() {
 		return amount;
+	}
+
+	public boolean isVoided() {
+		return voidedAt != null;
+	}
+
+	public Instant getVoidedAt() {
+		return voidedAt;
+	}
+
+	public void markVoided(Instant when) {
+		this.voidedAt = when;
 	}
 
 	public Instant getIssuedAt() {

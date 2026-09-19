@@ -21,6 +21,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.kafka.core.KafkaTemplate;
 
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.common.event.NotificationFailed;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.Topics;
 import com.investorbook.notificationservice.dao.ProcessedEventRepository;
@@ -84,5 +85,26 @@ class NotificationEventListenerTest {
 
 		verify(emailSender, never()).sendCompletionEmail(any());
 		verify(kafkaTemplate, never()).send(any(String.class), any(), any());
+	}
+
+	/**
+	 * A permanently undeliverable recipient is the notification step's real
+	 * failure: unlike a mail-server outage, no retry can ever help, so the saga
+	 * must be compensated (invoice voided, payment refunded) instead of
+	 * completing, and OrderCompleted must NOT be published.
+	 */
+	@Test
+	void anUndeliverableRecipient_publishesNotificationFailed_notOrderCompleted() throws Exception {
+		doThrow(new UndeliverableRecipientException("recipient address is missing or malformed")).when(emailSender)
+				.sendCompletionEmail(any());
+
+		listener.onInvoiceIssued(invoiceIssued());
+
+		ArgumentCaptor<NotificationFailed> published = ArgumentCaptor.forClass(NotificationFailed.class);
+		verify(kafkaTemplate).send(eq(Topics.NOTIFICATION_FAILED), eq("order-1"), published.capture());
+		assertThat(published.getValue().getInvoiceNumber()).isEqualTo("INV-ABCD1234");
+		assertThat(published.getValue().getAmount()).isEqualByComparingTo("50.00");
+		assertThat(published.getValue().getReason()).contains("malformed");
+		verify(kafkaTemplate, never()).send(eq(Topics.ORDER_COMPLETED), any(), any());
 	}
 }

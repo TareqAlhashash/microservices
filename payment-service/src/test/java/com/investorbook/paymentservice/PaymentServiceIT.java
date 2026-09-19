@@ -31,6 +31,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.investorbook.common.event.InvoiceFailed;
+import com.investorbook.common.event.InvoiceVoided;
 import com.investorbook.common.event.OrderPlaced;
 import com.investorbook.common.event.Topics;
 
@@ -139,6 +141,55 @@ class PaymentServiceIT {
 							.isEmpty());
 			// give the (already-processed) redelivery time to reach the listener too
 			List<ConsumerRecord<String, String>> afterSettling = recordsForOrder(consumer, Topics.PAYMENT_SUCCEEDED,
+					orderId, Duration.ofSeconds(5));
+			assertThat(afterSettling).isEmpty();
+		}
+	}
+
+	@Test
+	void aFailedInvoice_resultsInPaymentRefunded() {
+		String orderId = UUID.randomUUID().toString();
+		kafkaTemplate.send(Topics.INVOICE_FAILED, orderId, new InvoiceFailed(UUID.randomUUID().toString(), orderId,
+				"jane@example.com", new BigDecimal("600.00"), "amount exceeds the invoicing limit", Instant.now()));
+
+		try (Consumer<String, String> consumer = newConsumer("test-payment-refunded-1", Topics.PAYMENT_REFUNDED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.PAYMENT_REFUNDED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+		}
+	}
+
+	@Test
+	void aVoidedInvoice_resultsInPaymentRefunded() {
+		String orderId = UUID.randomUUID().toString();
+		kafkaTemplate.send(Topics.INVOICE_VOIDED, orderId, new InvoiceVoided(UUID.randomUUID().toString(), orderId,
+				"jane@example.com", new BigDecimal("80.00"), "INV-AAAA1111", "customer could not be notified",
+				Instant.now()));
+
+		try (Consumer<String, String> consumer = newConsumer("test-payment-refunded-2", Topics.PAYMENT_REFUNDED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.PAYMENT_REFUNDED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+		}
+	}
+
+	/**
+	 * A refund must never be issued twice for the same trigger: a redelivered
+	 * InvoiceFailed (same event id) results in exactly one PaymentRefunded.
+	 */
+	@Test
+	void aRedeliveredInvoiceFailed_resultsInOnlyOnePaymentRefunded() {
+		String orderId = UUID.randomUUID().toString();
+		InvoiceFailed event = new InvoiceFailed(UUID.randomUUID().toString(), orderId, "jane@example.com",
+				new BigDecimal("600.00"), "amount exceeds the invoicing limit", Instant.now());
+		kafkaTemplate.send(Topics.INVOICE_FAILED, orderId, event);
+		kafkaTemplate.send(Topics.INVOICE_FAILED, orderId, event);
+
+		try (Consumer<String, String> consumer = newConsumer("test-payment-refunded-3", Topics.PAYMENT_REFUNDED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.PAYMENT_REFUNDED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+			List<ConsumerRecord<String, String>> afterSettling = recordsForOrder(consumer, Topics.PAYMENT_REFUNDED,
 					orderId, Duration.ofSeconds(5));
 			assertThat(afterSettling).isEmpty();
 		}

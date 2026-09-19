@@ -152,4 +152,28 @@ class NotificationServiceIT {
 		}
 		assertThat(emailsToRecipient).isEqualTo(1);
 	}
+
+	/**
+	 * The notification step's real failure, end to end against a real Kafka and
+	 * a real SMTP server: an address that can never receive mail publishes
+	 * NotificationFailed (which starts the void-invoice and refund chain), no
+	 * mail is sent, and OrderCompleted is NOT published.
+	 */
+	@Test
+	void anUndeliverableRecipient_publishesNotificationFailed_andNeverOrderCompleted() throws Exception {
+		String orderId = UUID.randomUUID().toString();
+		publishInvoiceIssued(UUID.randomUUID().toString(), orderId, "not-an-email-address", "INV-CCCC3333");
+
+		try (Consumer<String, String> failed = newConsumer("test-notification-failed-1", Topics.NOTIFICATION_FAILED);
+				Consumer<String, String> completed = newConsumer("test-order-completed-3", Topics.ORDER_COMPLETED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(failed, Topics.NOTIFICATION_FAILED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+			assertThat(recordsForOrder(completed, Topics.ORDER_COMPLETED, orderId, Duration.ofSeconds(3))).isEmpty();
+		}
+		// other tests in this class do send mail, so look only for this order's invoice
+		for (MimeMessage message : greenMail.getReceivedMessages()) {
+			assertThat(message.getSubject()).doesNotContain("INV-CCCC3333");
+		}
+	}
 }

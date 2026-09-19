@@ -13,6 +13,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -20,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import com.investorbook.common.event.InvoiceIssued;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.PaymentFailed;
+import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.orderservice.dao.OrderRepository;
 import com.investorbook.orderservice.dao.entities.OrderEntity;
@@ -104,6 +107,65 @@ class OrderEventListenerTest {
 		ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
 		verify(orderRepository).save(saved.capture());
 		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.COMPLETED);
+	}
+
+	private static PaymentRefunded paymentRefunded() {
+		return new PaymentRefunded("evt-7", "order-1", "jane@example.com", new BigDecimal("50.00"),
+				"invoice could not be issued", Instant.now());
+	}
+
+	/**
+	 * The refund can outrun the order's own PaymentSucceeded/InvoiceIssued
+	 * transitions (they arrive on different topics, so Kafka guarantees no
+	 * ordering between them), so a cancel has to be accepted from any of the
+	 * pre-terminal statuses, not just the one the happy path would normally be in.
+	 */
+	@ParameterizedTest
+	@EnumSource(value = OrderStatus.class, names = { "PLACED", "PAID", "INVOICED" })
+	void onPaymentRefunded_cancelsAnOrderThatHasNotReachedATerminalStatus(OrderStatus current) {
+		OrderEntity order = orderWithStatus(current);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
+		verify(orderRepository).save(saved.capture());
+		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.CANCELLED);
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = OrderStatus.class, names = { "COMPLETED", "PAYMENT_FAILED", "CANCELLED" })
+	void onPaymentRefunded_isANoOp_whenTheOrderIsAlreadyTerminal(OrderStatus current) {
+		OrderEntity order = orderWithStatus(current);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onPaymentRefunded_isIgnored_forAnUnknownOrder() {
+		when(orderRepository.findById("order-1")).thenReturn(Optional.empty());
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		verify(orderRepository, never()).save(any());
+	}
+
+	/**
+	 * A PaymentSucceeded/InvoiceIssued that arrives after the cancel (the
+	 * cross-topic race above, other way round) must not resurrect the order.
+	 */
+	@Test
+	void aLatePaymentSucceeded_doesNotResurrectACancelledOrder() {
+		OrderEntity order = orderWithStatus(OrderStatus.CANCELLED);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentSucceeded(
+				new PaymentSucceeded("evt-8", "order-1", "jane@example.com", new BigDecimal("50.00"), Instant.now()));
+
+		verify(orderRepository, never()).save(any());
 	}
 
 	@Test

@@ -14,6 +14,13 @@ public final class Topics {
 	public static final String INVOICE_ISSUED = "invoice.issued";
 	public static final String ORDER_COMPLETED = "order.completed";
 
+	// Compensation topics: published when a later saga step fails and earlier
+	// steps' effects have to be undone.
+	public static final String INVOICE_FAILED = "invoice.failed";
+	public static final String NOTIFICATION_FAILED = "notification.failed";
+	public static final String INVOICE_VOIDED = "invoice.voided";
+	public static final String PAYMENT_REFUNDED = "payment.refunded";
+
 	private Topics() {
 	}
 }

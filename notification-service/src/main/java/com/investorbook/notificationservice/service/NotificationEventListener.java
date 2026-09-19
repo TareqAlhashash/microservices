@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.common.event.NotificationFailed;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.Topics;
 import com.investorbook.notificationservice.dao.ProcessedEventRepository;
@@ -41,20 +42,39 @@ public class NotificationEventListener {
 			return;
 		}
 
-		// The completion email is a best-effort side channel, not a gate on the
+		String safeOrderId = sanitizeForLog(event.getOrderId());
+		logger.info("saga: InvoiceIssued for order {} (invoice {}), notifying the customer",
+				safeOrderId, sanitizeForLog(event.getInvoiceNumber()));
+
+		// A mail-server problem is a best-effort side channel, not a gate on the
 		// saga completing: no real mail server is configured outside tests (see
 		// NotificationEmailSender), so failing to send shouldn't leave every order
-		// stuck at INVOICED forever in a normal local run.
+		// stuck at INVOICED forever in a normal local run. An address that can
+		// never receive mail is different: nothing can ever be sent, so that one
+		// is a real failure and compensates the saga.
 		try {
 			emailSender.sendCompletionEmail(event);
+		} catch (UndeliverableRecipientException e) {
+			publishNotificationFailed(event, e.getMessage());
+			return;
 		} catch (Exception e) {
-			logger.warn("failed to send completion email for order {}: {}", sanitizeForLog(event.getOrderId()),
+			logger.warn("failed to send completion email for order {}: {}", safeOrderId,
 					sanitizeForLog(e.toString()));
 		}
 
+		logger.info("saga: customer notified for order {}, publishing OrderCompleted", safeOrderId);
 		kafkaTemplate.send(Topics.ORDER_COMPLETED, event.getOrderId(),
 				new OrderCompleted(UUID.randomUUID().toString(), event.getOrderId(), event.getCustomerEmail(),
 						Instant.now()));
+	}
+
+	private void publishNotificationFailed(InvoiceIssued event, String reason) {
+		logger.warn("compensation: the customer for order {} can never be notified ({}), invoice {} has to be "
+				+ "voided and the payment refunded, publishing NotificationFailed",
+				sanitizeForLog(event.getOrderId()), sanitizeForLog(reason), sanitizeForLog(event.getInvoiceNumber()));
+		kafkaTemplate.send(Topics.NOTIFICATION_FAILED, event.getOrderId(),
+				new NotificationFailed(UUID.randomUUID().toString(), event.getOrderId(), event.getCustomerEmail(),
+						event.getAmount(), event.getInvoiceNumber(), reason, Instant.now()));
 	}
 
 	/** See payment-service's ProcessedEvent for why this needs saveAndFlush, not save. */

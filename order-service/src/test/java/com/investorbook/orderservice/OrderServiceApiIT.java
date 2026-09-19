@@ -46,6 +46,7 @@ import org.testcontainers.utility.DockerImageName;
 import com.investorbook.common.event.InvoiceIssued;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.PaymentFailed;
+import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.common.event.Topics;
 import com.investorbook.orderservice.service.OrderResponse;
@@ -196,6 +197,75 @@ class OrderServiceApiIT {
 				email, amount, "card declined", Instant.now()));
 
 		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("PAYMENT_FAILED"));
+	}
+
+	/**
+	 * Compensation chain A: invoice-service could not issue an invoice, so
+	 * payment-service refunded the payment. The order is still PAID when the
+	 * refund arrives and must end up CANCELLED, not stuck PAID forever.
+	 */
+	@Test
+	void aRefundAfterAFailedInvoice_cancelsAPaidOrder() {
+		String email = "invoice-failed@example.com";
+		BigDecimal amount = new BigDecimal("600.00");
+		String orderId = placeOrder(email, amount.toString());
+
+		kafkaTemplate.send(Topics.PAYMENT_SUCCEEDED, orderId,
+				new PaymentSucceeded(UUID.randomUUID().toString(), orderId, email, amount, Instant.now()));
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("PAID"));
+
+		kafkaTemplate.send(Topics.PAYMENT_REFUNDED, orderId, new PaymentRefunded(UUID.randomUUID().toString(),
+				orderId, email, amount, "invoice could not be issued", Instant.now()));
+
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("CANCELLED"));
+	}
+
+	/**
+	 * Compensation chain B: the customer could not be notified, so the invoice
+	 * was voided and the payment refunded. The order had already reached
+	 * INVOICED and must end up CANCELLED, not stuck INVOICED forever.
+	 */
+	@Test
+	void aRefundAfterAFailedNotification_cancelsAnInvoicedOrder() {
+		String email = "notification-failed@example.com";
+		BigDecimal amount = new BigDecimal("80.00");
+		String orderId = placeOrder(email, amount.toString());
+
+		kafkaTemplate.send(Topics.PAYMENT_SUCCEEDED, orderId,
+				new PaymentSucceeded(UUID.randomUUID().toString(), orderId, email, amount, Instant.now()));
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("PAID"));
+		kafkaTemplate.send(Topics.INVOICE_ISSUED, orderId, new InvoiceIssued(UUID.randomUUID().toString(), orderId,
+				email, amount, "INV-0002", Instant.now()));
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("INVOICED"));
+
+		kafkaTemplate.send(Topics.PAYMENT_REFUNDED, orderId, new PaymentRefunded(UUID.randomUUID().toString(),
+				orderId, email, amount, "customer could not be notified", Instant.now()));
+
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("CANCELLED"));
+	}
+
+	/**
+	 * A redelivered PaymentRefunded must leave the order CANCELLED (not error,
+	 * and not move it anywhere else), same state-machine-guard idempotency as
+	 * every other transition here.
+	 */
+	@Test
+	void aRedeliveredPaymentRefunded_leavesTheOrderCancelled() {
+		String email = "duplicate-refund@example.com";
+		BigDecimal amount = new BigDecimal("90.00");
+		String orderId = placeOrder(email, amount.toString());
+		kafkaTemplate.send(Topics.PAYMENT_SUCCEEDED, orderId,
+				new PaymentSucceeded(UUID.randomUUID().toString(), orderId, email, amount, Instant.now()));
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("PAID"));
+
+		PaymentRefunded event = new PaymentRefunded(UUID.randomUUID().toString(), orderId, email, amount,
+				"invoice could not be issued", Instant.now());
+		kafkaTemplate.send(Topics.PAYMENT_REFUNDED, orderId, event);
+		kafkaTemplate.send(Topics.PAYMENT_REFUNDED, orderId, event);
+
+		await().atMost(Duration.ofSeconds(10)).until(() -> statusOf(orderId, email).equals("CANCELLED"));
+		await().pollDelay(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5))
+				.until(() -> statusOf(orderId, email).equals("CANCELLED"));
 	}
 
 	/**

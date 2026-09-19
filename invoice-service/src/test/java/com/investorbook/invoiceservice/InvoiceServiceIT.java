@@ -31,6 +31,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import com.investorbook.common.event.NotificationFailed;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.common.event.Topics;
 import com.investorbook.invoiceservice.dao.InvoiceRepository;
@@ -138,5 +139,74 @@ class InvoiceServiceIT {
 		long invoicesForOrder = invoiceRepository.findAll().stream().filter(invoice -> invoice.getOrderId().equals(orderId))
 				.count();
 		assertThat(invoicesForOrder).isEqualTo(1);
+	}
+
+	/**
+	 * The failing step of chain A: payment succeeded but the amount is too large
+	 * to invoice automatically, so InvoiceFailed (which triggers the refund) is
+	 * published instead of InvoiceIssued, and no invoice row exists.
+	 */
+	@Test
+	void aPaymentSucceededAtTheInvoicingLimit_resultsInInvoiceFailed_andNoInvoiceRow() {
+		String orderId = UUID.randomUUID().toString();
+		// matches InvoiceEventListener.INVOICE_LIMIT (package-private; not worth
+		// widening its visibility just for this test to reference it directly)
+		publishPaymentSucceeded(UUID.randomUUID().toString(), orderId, new BigDecimal("500.00"));
+
+		try (Consumer<String, String> consumer = newConsumer("test-invoice-failed-1", Topics.INVOICE_FAILED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.INVOICE_FAILED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+		}
+
+		assertThat(invoiceRepository.findAll().stream().anyMatch(invoice -> invoice.getOrderId().equals(orderId)))
+				.isFalse();
+	}
+
+	/**
+	 * Compensation chain B's invoice step, against a real database: the invoice
+	 * issued earlier is really marked voided, and InvoiceVoided (which triggers
+	 * the refund) is published.
+	 */
+	@Test
+	void aNotificationFailed_voidsTheIssuedInvoice_andPublishesInvoiceVoided() {
+		String orderId = UUID.randomUUID().toString();
+		publishPaymentSucceeded(UUID.randomUUID().toString(), orderId, new BigDecimal("50.00"));
+		await().atMost(Duration.ofSeconds(15)).until(() -> invoiceRepository.findByOrderId(orderId).isPresent());
+		String invoiceNumber = invoiceRepository.findByOrderId(orderId).get().getInvoiceNumber();
+
+		kafkaTemplate.send(Topics.NOTIFICATION_FAILED, orderId, new NotificationFailed(UUID.randomUUID().toString(),
+				orderId, "jane@example.com", new BigDecimal("50.00"), invoiceNumber, "recipient address is undeliverable",
+				Instant.now()));
+
+		try (Consumer<String, String> consumer = newConsumer("test-invoice-voided-1", Topics.INVOICE_VOIDED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.INVOICE_VOIDED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+		}
+		assertThat(invoiceRepository.findByOrderId(orderId).get().isVoided()).isTrue();
+	}
+
+	/** A redelivered NotificationFailed (same event id) must void once and publish InvoiceVoided once. */
+	@Test
+	void aRedeliveredNotificationFailed_resultsInOnlyOneInvoiceVoided() {
+		String orderId = UUID.randomUUID().toString();
+		publishPaymentSucceeded(UUID.randomUUID().toString(), orderId, new BigDecimal("50.00"));
+		await().atMost(Duration.ofSeconds(15)).until(() -> invoiceRepository.findByOrderId(orderId).isPresent());
+		String invoiceNumber = invoiceRepository.findByOrderId(orderId).get().getInvoiceNumber();
+
+		NotificationFailed event = new NotificationFailed(UUID.randomUUID().toString(), orderId, "jane@example.com",
+				new BigDecimal("50.00"), invoiceNumber, "recipient address is undeliverable", Instant.now());
+		kafkaTemplate.send(Topics.NOTIFICATION_FAILED, orderId, event);
+		kafkaTemplate.send(Topics.NOTIFICATION_FAILED, orderId, event);
+
+		try (Consumer<String, String> consumer = newConsumer("test-invoice-voided-2", Topics.INVOICE_VOIDED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(consumer, Topics.INVOICE_VOIDED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+			List<ConsumerRecord<String, String>> afterSettling = recordsForOrder(consumer, Topics.INVOICE_VOIDED,
+					orderId, Duration.ofSeconds(5));
+			assertThat(afterSettling).isEmpty();
+		}
 	}
 }
