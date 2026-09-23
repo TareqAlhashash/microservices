@@ -1,4 +1,4 @@
-package com.investorbook.memberservice.service;
+package com.investorbook.memberservice.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,6 +42,7 @@ import com.investorbook.memberservice.dto.Member;
 import com.investorbook.memberservice.exception.MemberAlreadyExistsException;
 import com.investorbook.memberservice.exception.MemberNotFoundException;
 import com.investorbook.memberservice.exception.MemberUploadPicException;
+import com.investorbook.memberservice.service.AuthenticationServiceClient;
 
 @ExtendWith(MockitoExtension.class)
 class MemberServiceControllerTest {

@@ -1,4 +1,4 @@
-package com.investorbook.notificationservice.service;
+package com.investorbook.notificationservice.exception;
 
 /**
  * The customer's address can never receive mail (missing, malformed, or more

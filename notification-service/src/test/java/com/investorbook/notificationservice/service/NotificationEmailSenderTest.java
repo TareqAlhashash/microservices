@@ -25,6 +25,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.notificationservice.exception.UndeliverableRecipientException;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationEmailSenderTest {

@@ -11,6 +11,7 @@ import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Component;
 
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.notificationservice.exception.UndeliverableRecipientException;
 
 /**
  * Real JavaMailSender-based sending code, exercised for real against a fake

@@ -17,6 +17,7 @@ import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.Topics;
 import com.investorbook.notificationservice.dao.ProcessedEventRepository;
 import com.investorbook.notificationservice.dao.entities.ProcessedEvent;
+import com.investorbook.notificationservice.exception.UndeliverableRecipientException;
 
 @Component
 public class NotificationEventListener {

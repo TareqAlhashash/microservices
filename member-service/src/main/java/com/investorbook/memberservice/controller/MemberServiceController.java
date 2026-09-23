@@ -1,4 +1,4 @@
-package com.investorbook.memberservice.service;
+package com.investorbook.memberservice.controller;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -29,6 +29,7 @@ import com.investorbook.memberservice.dto.Member;
 import com.investorbook.memberservice.exception.MemberAlreadyExistsException;
 import com.investorbook.memberservice.exception.MemberNotFoundException;
 import com.investorbook.memberservice.exception.MemberUploadPicException;
+import com.investorbook.memberservice.service.AuthenticationServiceClient;
 
 @RestController
 public class MemberServiceController {

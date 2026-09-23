@@ -1,4 +1,4 @@
-package com.investorbook.apigateway.service;
+package com.investorbook.apigateway.controller;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
