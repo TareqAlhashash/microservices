@@ -1,4 +1,4 @@
-package com.investorbook.orderservice.service;
+package com.investorbook.orderservice.dto;
 
 import java.math.BigDecimal;
 

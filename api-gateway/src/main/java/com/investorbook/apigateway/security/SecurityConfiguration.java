@@ -16,10 +16,17 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 	@Override
 	public void configure(WebSecurity web) throws Exception {
 		// /actuator/**: see member-service's SecurityConfiguration for why this is unauthenticated.
-		web.ignoring().antMatchers("/login", "/uaa/oauth/token", "/member-service/signup", "/actuator/**");
+		// /order-service/products/**: proxied through to order-service's own public catalog
+		// endpoints (see its SecurityConfiguration) - browsing the storefront doesn't require a token.
+		// /dashboard/**: this app's own DashboardController, a health-check aggregator - same
+		// "no bearer token" exemption as /actuator/** itself (see its Javadoc).
+		web.ignoring().antMatchers("/login", "/uaa/oauth/token", "/member-service/signup", "/actuator/**",
+				"/order-service/products", "/order-service/products/**", "/dashboard/**");
 	}
 	@Override
 	protected void configure(HttpSecurity http) throws Exception {
+		// CORS is handled by a standalone CorsFilter (see CorsConfig), not here - see its
+		// Javadoc for why: WebSecurity.ignoring() above would otherwise skip it entirely.
 		http.authorizeRequests().anyRequest().authenticated()
 		.and().csrf().disable()
 		.logout().logoutUrl("/logout").permitAll()

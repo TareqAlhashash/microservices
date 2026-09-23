@@ -2,6 +2,8 @@ package com.investorbook.orderservice.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -19,7 +21,10 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.investorbook.common.event.InvoiceFailed;
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.common.event.InvoiceVoided;
+import com.investorbook.common.event.NotificationFailed;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.PaymentFailed;
 import com.investorbook.common.event.PaymentRefunded;
@@ -34,11 +39,14 @@ class OrderEventListenerTest {
 	@Mock
 	private OrderRepository orderRepository;
 
+	@Mock
+	private OrderEventLogRecorder eventLogRecorder;
+
 	private OrderEventListener listener;
 
 	@BeforeEach
 	void setUp() {
-		listener = new OrderEventListener(orderRepository);
+		listener = new OrderEventListener(orderRepository, eventLogRecorder);
 	}
 
 	private static OrderEntity orderWithStatus(OrderStatus status) {
@@ -58,6 +66,7 @@ class OrderEventListenerTest {
 		ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
 		verify(orderRepository).save(saved.capture());
 		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.PAID);
+		verify(eventLogRecorder).record(eq("order-1"), eq("PaymentSucceeded"), anyString());
 	}
 
 	@Test
@@ -175,6 +184,39 @@ class OrderEventListenerTest {
 		listener.onPaymentSucceeded(
 				new PaymentSucceeded("evt-6", "missing", "jane@example.com", new BigDecimal("50.00"), Instant.now()));
 
+		verify(orderRepository, never()).save(any());
+	}
+
+	/**
+	 * InvoiceFailed/NotificationFailed/InvoiceVoided don't change this order's own status
+	 * (payment-service/invoice-service react to them instead) - these three are audit-only,
+	 * recorded for the dashboard's event timeline without touching the repository at all.
+	 */
+	@Test
+	void onInvoiceFailed_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onInvoiceFailed(
+				new InvoiceFailed("evt-9", "order-1", "jane@example.com", new BigDecimal("600.00"),
+						"above the invoicing limit", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("InvoiceFailed"), anyString());
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onNotificationFailed_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onNotificationFailed(new NotificationFailed("evt-10", "order-1", "jane@example.com",
+				new BigDecimal("50.00"), "INV-0001", "undeliverable address", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("NotificationFailed"), anyString());
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onInvoiceVoided_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onInvoiceVoided(new InvoiceVoided("evt-11", "order-1", "jane@example.com", new BigDecimal("50.00"),
+				"INV-0001", "notification could not be delivered", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("InvoiceVoided"), anyString());
 		verify(orderRepository, never()).save(any());
 	}
 }

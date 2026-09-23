@@ -21,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.hateoas.PagedModel;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -49,7 +51,7 @@ import com.investorbook.common.event.PaymentFailed;
 import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.common.event.Topics;
-import com.investorbook.orderservice.service.OrderResponse;
+import com.investorbook.orderservice.dto.OrderResponse;
 
 /**
  * Proves order-service's half of the purchase saga against a real Postgres
@@ -289,6 +291,43 @@ class OrderServiceApiIT {
 		// give the (already-processed) redelivery time to reach the listener too
 		await().pollDelay(Duration.ofSeconds(3)).atMost(Duration.ofSeconds(5))
 				.until(() -> statusOf(orderId, email).equals("PAID"));
+	}
+
+	/**
+	 * spring.data.web.pageable.max-page-size=100 (application.properties) is what's actually
+	 * meant to enforce this, not application code (see OrderController.listOrders) - this
+	 * proves the property really takes effect over real HTTP dispatch, not just that it's set.
+	 */
+	private static final ParameterizedTypeReference<PagedModel<OrderResponse>> ORDERS_PAGE_TYPE = new ParameterizedTypeReference<PagedModel<OrderResponse>>() {
+	};
+
+	@Test
+	void listOrders_capsAnOversizedRequestedPageSize() {
+		String email = "paging@example.com";
+		placeOrder(email, "10.00");
+
+		HttpHeaders headers = new HttpHeaders();
+		headers.setBearerAuth(tokenFor(email));
+		ResponseEntity<PagedModel<OrderResponse>> response = restTemplate.exchange("/orders?size=99999",
+				HttpMethod.GET, new HttpEntity<>(headers), ORDERS_PAGE_TYPE);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody().getMetadata().getSize()).isEqualTo(100);
+	}
+
+	@Test
+	void listOrders_filtersServerSide_byOrderId() {
+		String email = "search@example.com";
+		String orderId = placeOrder(email, "25.00");
+
+		HttpHeaders headers = new HttpHeaders();
+		headers.setBearerAuth(tokenFor(email));
+		ResponseEntity<PagedModel<OrderResponse>> response = restTemplate.exchange(
+				"/orders?search=" + orderId.substring(0, 8), HttpMethod.GET, new HttpEntity<>(headers),
+				ORDERS_PAGE_TYPE);
+
+		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+		assertThat(response.getBody().getContent()).extracting(OrderResponse::getId).contains(orderId);
 	}
 
 	private static ConsumerRecord<String, String> findRecordByKey(ConsumerRecords<String, String> records,

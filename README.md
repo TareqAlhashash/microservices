@@ -151,12 +151,13 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 | `member-service` | 8100 | Signup, profile, S3 picture upload |
 | `resource-service` | 9200 | Template for a new protected service |
 | `api-gateway` | 8765 | Zuul edge router, the only externally-called service |
-| `order-service` | 8200 | Places orders, owns order status (including `CANCELLED` after a refund) |
+| `order-service` | 8200 | Places orders, owns order status (including `CANCELLED` after a refund); also owns the product catalog (`GET /products`) |
 | `payment-service` | 8300 | Mocked, deterministic payment decision; refunds when a later step fails |
 | `invoice-service` | 8400 | Generates an invoice on successful payment; voids it if notification fails |
 | `notification-service` | 8500 | Emails (mocked) the customer, closes the saga |
 | `common` | n/a | Shared DTOs, events, error handling (not a service) |
 | Kafka | 9092 | Event bus for the purchase-flow saga (`docker compose up -d`, not a service) |
+| `frontend` | 5173 | React storefront (Vite dev server), calls `api-gateway` directly over CORS - not a Maven module |
 
 ## What's covered, honestly
 
@@ -177,6 +178,8 @@ docker compose up -d                           # Kafka, for the purchase-flow se
 # start eureka-server, auth-service, member-service, resource-service, api-gateway,
 # then the four purchase-flow services, each via:
 cd <service-dir> && mvn spring-boot:run
+
+cd frontend && npm install && npm run dev     # storefront UI, once api-gateway is up
 ```
 
 Full startup order, required Postgres setup, and per-module test commands are in

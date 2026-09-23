@@ -656,3 +656,95 @@ build. It surfaces as a runtime `java.lang.Error: Unresolved compilation problem
 test method that touches the bad line (for example a missing `throws` for a checked
 `MessagingException`), so a "green" class with one odd error means read the Surefire/Failsafe
 report under `target/` for that message before assuming the test logic is wrong.
+
+## Storefront frontend (React)
+
+`frontend/` is a React storefront UI (Vite + TypeScript + Tailwind CSS v4, React Router, plain
+React Context for cart/auth state - no Redux/Zustand, no CSS-in-JS). It's **not a Maven module and
+not registered with Eureka**: it's a browser client that calls `api-gateway` directly over CORS,
+same as any other external client of this system, not something Zuul proxies requests through.
+Design source: [Figma](https://www.figma.com/design/WskdCUCFg3FfpHQtq40uZu/InvestorBook-Store-UI)
+(catalog grid, login, cart, order-status screens - indigo/slate palette, Inter). See
+`frontend/README.md` for the stack, the exact endpoints it calls, and what's deliberately not
+built (no admin/product-write UI, no token refresh).
+
+Two backend changes were needed to support it, both minimal and both documented at their own call
+sites rather than repeated here in full:
+
+- **`order-service` gained a product catalog** (`ProductEntity`/`ProductRepository`/
+  `ProductController`, `GET /products` and `GET /products/{id}`), seeded once on startup by
+  `ProductCatalogSeeder` with a fixed, curated list (not regenerated per run, so restarts and
+  tests stay deterministic). Deliberately unauthenticated (`SecurityConfiguration` ignores
+  `/products/**`) - browsing a storefront doesn't require being logged in, only placing an order
+  (`POST /orders`) does. The catalog was added to `order-service` rather than as a new service or
+  module, since it already owns the purchasing domain and the Postgres/JPA wiring.
+- **`api-gateway` gained CORS support** (`config/CorsConfig`) plus `/order-service/products/**`
+  added to its own ignore-list, mirroring how `/member-service/signup` was already ignored - the
+  gateway's own auth layer, not just order-service's, has to let the public catalog route through.
+  CORS is registered as a standalone `CorsFilter` bean at `Ordered.HIGHEST_PRECEDENCE`, **not**
+  via `HttpSecurity.cors()` - `WebSecurity.ignoring()` (used for every public route: `/products`,
+  `/actuator/**`, `/dashboard/**`) bypasses Spring Security's whole filter chain, which would skip
+  a `.cors()`-registered filter too and leave those exact routes without CORS headers even though
+  they're the ones a browser calls without a token. Found by testing the real browser flow, not by
+  inspection - see CorsConfig's Javadoc. Allowed origins are
+  `investorbook.security.cors.allowed-origins` (`${CORS_ALLOWED_ORIGINS:...}`, defaulting to the
+  Vite dev server's `http://localhost:5173`), following the same `${ENV_VAR:default}` pattern as
+  this file's other externalised config. No other service needed CORS changes - `api-gateway` is
+  the only one browsers ever call directly.
+
+Checkout still goes through the existing, unmodified `POST /orders` (`amount` only - see "Event-
+driven purchase flow" above); the frontend computes the cart total client-side and sends it as a
+single opaque amount, same as any other caller of that endpoint. The order-status page polls
+`GET /orders/{id}` every 3 seconds so the saga's state machine (`PLACED → PAID → INVOICED →
+COMPLETED`, or a compensation path to `PAYMENT_FAILED`/`CANCELLED`) is visibly demonstrated live,
+not just provable via the backend's own IT suites.
+
+### System dashboard
+
+A `/dashboard` page (behind a header link once logged in) shows live service health and every
+order's real event timeline - see `frontend/README.md`'s "The dashboard" section for the frontend
+side. Two backend additions support it:
+
+- **`order-service` gained a persisted event audit trail**, not a scrape of console log text
+  (which isn't queryable and wouldn't exist at all in a real deployment). `OrderEventLogEntity`/
+  `OrderEventLogRepository` store one row per saga event (`orderId`, `eventType`, `message`,
+  `occurredAt`); `OrderEventLogRecorder` writes them, called from `OrderEventPublisher` (for the
+  `OrderPlaced` it publishes) and every handler in `OrderEventListener` (for what it consumes) -
+  reusing each one's own existing log message text, not a separate copy. `OrderEventListener` also
+  gained three new listeners, `onInvoiceFailed`/`onNotificationFailed`/`onInvoiceVoided`, purely to
+  record those compensation-trigger events for the timeline - they don't transition this order's
+  own status (payment-service/invoice-service already react to them for that), so they're
+  deliberately not `@Transactional` the way the status-changing handlers are. New endpoints
+  `GET /orders` (most recent 100, every customer - an ops view, not a "my orders" page, so
+  deliberately not filtered by the caller's own email the way you might expect; a real deployment
+  would gate this behind an ADMIN role, but every member is `NORMAL_USER` today, same as
+  everywhere else in this repo) and `GET /orders/{id}/events` back the dashboard's table and its
+  expandable rows. One easy-to-miss consequence of adding new `@KafkaListener` topics to an
+  *existing* consumer group (`order-service`'s): Kafka replays a topic from the beginning the
+  first time a consumer group subscribes to it (no prior committed offset), so the three new
+  listeners backfilled audit rows for old orders' historical `InvoiceFailed`/`NotificationFailed`/
+  `InvoiceVoided` events on first deploy, while the five pre-existing listeners' topics (already
+  having committed offsets) did not retroactively backfill `OrderPlaced`/`PaymentSucceeded`/etc.
+  for those same old orders - expected, not a bug, but confusing if you don't know to expect it.
+- **`api-gateway` gained a health-aggregation endpoint**, `DashboardController`'s
+  `GET /dashboard/services` (public, same ignore-list reasoning as `/actuator/**` itself). A
+  browser can't reach any of the nine services directly - different origins/ports, and only
+  `api-gateway` has a CORS policy - so this app calls each one's own `/actuator/health`
+  server-to-server instead, resolving addresses through Eureka's `DiscoveryClient` rather than
+  hardcoded ports (`eureka-server` is the one unavoidable exception: `eureka.client.register-with-
+  eureka=false` means it can't be discovered through itself, so its `localhost:8761` address is
+  hardcoded). Needed a short-timeout `RestTemplate` bean (`config/RestTemplateConfig`, 1s
+  connect/read) so one dead service can't make the whole dashboard call hang. Two real bugs
+  surfaced only by actually calling this live (not by inspection) and are worth knowing about if
+  you touch this again:
+  - `auth-service` is the only service with a non-root `server.servlet.context-path` (`/uaa`), so
+    its actuator health lives at `/uaa/actuator/health`, not `/actuator/health` - the only other
+    per-service override in `DashboardController` (`HEALTH_PATH_OVERRIDES`) besides eureka-server.
+  - `notification-service` depends on `spring-boot-starter-mail`, which auto-configures a
+    `MailHealthIndicator` that pings the configured SMTP host - the harmless `localhost:2525`
+    placeholder nothing listens on in a normal local run (see "Event-driven purchase flow" above).
+    That made its aggregate `/actuator/health` report `DOWN` even though the service was fully
+    functional, contradicting this service's own documented design that an unreachable mail server
+    is a best-effort side channel, not a gate on anything. Fixed with
+    `management.health.mail.enabled=false` in its `application.properties`, not by suppressing the
+    dashboard's read of the result - the health check itself was wrong, not the caller.

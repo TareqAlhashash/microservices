@@ -15,8 +15,10 @@ public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
 
 	@Override
 	public void configure(WebSecurity web) throws Exception {
-		// See member-service's SecurityConfiguration for why this is unauthenticated.
-		web.ignoring().antMatchers("/actuator/**");
+		// /actuator/**: see member-service's SecurityConfiguration for why this is unauthenticated.
+		// /products/**: browsing the storefront's catalog doesn't require being logged in,
+		// unlike placing an order - only POST /orders stays behind @PreAuthorize.
+		web.ignoring().antMatchers("/actuator/**", "/products", "/products/**");
 	}
 
 	@Override
