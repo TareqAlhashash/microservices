@@ -70,7 +70,7 @@ export function LoginPage() {
         </button>
 
         <p className="text-center text-[13px] text-slate-500">
-          Use any account already signed up via member-service.
+          Demo account: demo@investorbook.com / demo12345
         </p>
       </form>
     </div>

@@ -83,15 +83,6 @@ export function KeyIcon(props: IconProps) {
   )
 }
 
-export function UserIcon(props: IconProps) {
-  return (
-    <svg {...base} {...props}>
-      <circle cx="12" cy="8" r="3.5" />
-      <path d="M5 20c0-3.9 3.1-7 7-7s7 3.1 7 7" />
-    </svg>
-  )
-}
-
 export function CubeIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>

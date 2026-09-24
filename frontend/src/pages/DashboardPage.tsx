@@ -10,7 +10,6 @@ import {
   KeyIcon,
   ReceiptIcon,
   RouterIcon,
-  UserIcon,
 } from '../icons/ServiceIcons'
 import type { OrderEventLog, OrderStatus, PagedOrders, ServiceStatus } from '../types'
 
@@ -18,8 +17,6 @@ const SERVICE_ICONS: Record<string, typeof CartIcon> = {
   'eureka-server': CompassIcon,
   'api-gateway': RouterIcon,
   'auth-service': KeyIcon,
-  'member-service': UserIcon,
-  'resource-service': CubeIcon,
   'order-service': CartIcon,
   'payment-service': CardIcon,
   'invoice-service': ReceiptIcon,
