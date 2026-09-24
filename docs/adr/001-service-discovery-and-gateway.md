@@ -39,6 +39,11 @@ routes are derived from service names it discovers there, not hardcoded hostname
   This repo keeps them because they're what the original code used and they still work correctly
   on this JDK/Spring Cloud version; a from-scratch system today would likely pick Spring Cloud
   Gateway plus Kubernetes DNS-based discovery instead.
+- **Update**: `api-gateway` now runs Spring Cloud Gateway (Spring Boot 4.1.1/Spring Cloud
+  2025.1.2 - see "api-gateway" in `CLAUDE.md`) rather than Zuul. Eureka is unchanged - Gateway
+  still discovers services through it, just via explicit routes (`GatewayRoutesConfig`) rather
+  than a route-per-service-automatically default, since Gateway's
+  discovery locator needs its own predicate/filter configuration to get comparable behavior.
 - **Bad, honestly**: Eureka's registry is itself a single point of failure in this setup.
   `eureka.client.register-with-eureka=false` on the naming server itself means there's no
   peer-replication, matching the demo-scale, single-node nature of the whole system, not a

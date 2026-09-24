@@ -36,10 +36,13 @@ services genuinely share), and `exception/CustomizedResponseEntityExceptionHandl
 error-response shape, `{timestamp, message, details}`, across every service's API).
 
 **Deliberately not in `common`**: any JPA entity, any business rule, any service-specific
-DTO. `auth-service` and `member-service` each define their *own* `MemberEntity` mapped to the
-same `members` table with different column subsets, on purpose, since sharing one would couple two
-services' internal data models to each other's release cycles for no real benefit, as neither
-needs the other's full picture of a member.
+DTO. `auth-service` defines its *own* `MemberEntity` (id/email/password hash only - just what
+authentication needs) rather than sharing one with any other service that might touch a member
+record, on purpose: coupling two services' internal data models to each other's release cycles
+for no real benefit. This system used to also have `member-service`, with its own richer
+`MemberEntity` mapped to the same `members` table with a different column subset for
+profile/social-network features - since removed as out of scope for the purchase-order flow this
+repo now focuses on, but the same reasoning would apply again if a service like it returned.
 
 ## Consequences
 

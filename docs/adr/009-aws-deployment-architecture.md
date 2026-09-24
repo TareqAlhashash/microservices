@@ -8,17 +8,20 @@ Accepted. Not deployed; this describes the target infrastructure shape, see the 
 ## Context
 
 Every service in this repo runs locally today: `mvn spring-boot:run` against a local Postgres and
-a `docker-compose.yml` Kafka broker. Nothing is deployed to AWS except S3 (and LocalStack for that
-in tests). The portfolio value of naming a target production architecture is answering the
+a `docker-compose.yml` Kafka broker. Nothing is deployed to AWS. (This system used to also use S3
+for profile-picture storage via `member-service`, since removed as out of scope for the purchase-
+order flow - the diagram this ADR describes predates that removal and still shows it; the
+reasoning below about mapping local infrastructure onto AWS managed services stands regardless.)
+The portfolio value of naming a target production architecture is answering the
 interview question "how would this actually run in production," not building it, so this ADR
 documents the shape and the reasoning without claiming any of it is live.
 
 ## Options considered
 
-**Compute for the nine services:**
+**Compute for the seven services:**
 
 1. **EC2 instances, self-managed.** Full control, but the team now owns OS patching, capacity
-   planning, and an AMI/deployment pipeline for nine simple services that don't need any of that
+   planning, and an AMI/deployment pipeline for seven simple services that don't need any of that
    control.
 2. **EKS (Kubernetes).** Powerful, and the industry-default answer, but a real operational
    surface: a control plane to manage, node groups or Fargate profiles either way, and cluster
@@ -45,7 +48,7 @@ documents the shape and the reasoning without claiming any of it is live.
    (SQLi, XSS rulesets) to happen no earlier than the load balancer, after traffic has already
    reached the VPC.
 7. **CloudFront + AWS WAF in front of the ALB** (the option taken). `api-gateway` is the one
-   externally-called service and the one carrying the raw OAuth2 password grant off the wire (see
+   externally-called service and the one carrying the raw username/password off the wire (see
    [ADR-002](002-oauth2-authentication.md)); filtering and TLS termination at the edge defends
    exactly that boundary before it's reached.
 
@@ -60,22 +63,22 @@ documents the shape and the reasoning without claiming any of it is live.
 
 ## Decision
 
-ECS Fargate running all nine existing services as tasks, spread across two Availability Zones,
+ECS Fargate running all seven existing services as tasks, spread across two Availability Zones,
 behind an Application Load Balancer, itself behind CloudFront with an attached AWS WAF Web ACL.
 RDS PostgreSQL (Multi-AZ, one instance) and Amazon MSK sit in private subnets in both AZs.
-Secrets Manager holds the JWT keypair, DB credentials, and OAuth2 client secret (replacing the
-`${ENV_VAR:default}` placeholders described in `CLAUDE.md`'s "Config & secrets" section).
+Secrets Manager holds the JWT keypair and DB credentials (replacing the `${ENV_VAR:default}`
+placeholders described in `CLAUDE.md`'s "Config & secrets" section).
 CloudWatch collects the structured logs and Actuator metrics every service already emits (see
 `CLAUDE.md`'s "Observability" section), nothing new has to be added to the application for that
 to work, only where the logs are shipped changes.
 
-This is a lift of the existing nine services onto managed AWS equivalents of their current local
+This is a lift of the existing seven services onto managed AWS equivalents of their current local
 infrastructure, not a redesign, no service is split, merged, or given new responsibilities to fit
 this deployment shape.
 
 ## Consequences
 
-- **Good**: every piece of local infrastructure this repo already depends on (Postgres, Kafka, S3,
+- **Good**: every piece of local infrastructure this repo already depends on (Postgres, Kafka,
   env-var secrets, Actuator/logs) has a named AWS managed-service equivalent, so the "how would
   this run in production" question has a concrete, defensible answer rather than a hand-wave.
 - **Good**: no new operational surface beyond what AWS itself manages, Fargate needs no cluster,
@@ -86,7 +89,7 @@ this deployment shape.
   pipeline, and a disaster-recovery story beyond "the standby exists."
 - **Bad, honestly**: Fargate's per-task pricing is generally more expensive than equivalent EC2
   capacity at steady, predictable load, the trade is paying more per unit of compute in exchange
-  for not operating instances. At nine low-traffic demo services that trade is easy to justify;
+  for not operating instances. At seven low-traffic demo services that trade is easy to justify;
   it's worth re-evaluating if traffic or service count grew enough that steady-state EC2 (or EKS
   with EC2 node groups) pricing became materially cheaper.
 - **Bad, honestly**: CloudFront in front of an application (rather than static assets) adds a

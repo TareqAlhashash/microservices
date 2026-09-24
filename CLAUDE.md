@@ -4,28 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-"InvestorBook" — a Spring Cloud microservices demo (originally Spring Boot 2.0.2, Spring Cloud
-Finchley, Java 8) modeling a social network for investors. See [`README.md`](README.md) for a
-short overview with the C4 diagrams (System Context, and Container diagrams for the core
-services and the purchase flow), and [`docs/adr/`](docs/adr/) for the architecture decision
-records behind the choices documented in this file (service discovery/gateway, OAuth2, the
-`common` library, per-service data ownership, and the four Kafka-saga decisions); per-endpoint
-field docs for planned features live in `api-gateway/requirements-member.txt` and
-`api-gateway/requierments-security.txt` (note the typo in the filename — don't "fix" it without
-checking for other references).
+"InvestorBook" — a Spring Cloud microservices demo built around a purchase-order system. See
+[`README.md`](README.md) for a short overview with the C4 diagrams (System Context, and Container
+diagrams for the core services and the purchase flow), and [`docs/adr/`](docs/adr/) for the
+architecture decision records behind the choices documented in this file (service
+discovery/gateway, OAuth2, the `common` library, per-service data ownership, and the four
+Kafka-saga decisions).
 
-Nine independently deployable Maven modules (the five original services plus `order-service`,
-`payment-service`, `invoice-service`, and `notification-service` — a new event-driven purchase
-flow, see "Event-driven purchase flow" below) plus one shared library, each with its own
-`pom.xml`. There is no parent/reactor POM — modules are built and run separately, and every
-module except `eureka-server` has test coverage (see below); `eureka-server` is still exactly as
-originally generated.
+Seven independently deployable Maven modules (`eureka-server`, `auth-service`, `api-gateway`, and
+the four event-driven purchase-flow services — `order-service`, `payment-service`,
+`invoice-service`, `notification-service`, see "Event-driven purchase flow" below) plus one
+shared library, each with its own `pom.xml`. There is no parent/reactor POM — modules are built
+and run separately, and every module has test coverage (see below).
 
 ## Commands
 
 Prefer the global `mvn` over any module's `mvnw`/`mvnw.cmd` wrapper — `common` doesn't even have
-one, and `member-service`'s wrapper is pinned to Maven 3.5.3, which is too old for the security
-plugins wired into that module (they require 3.6.3+). There is no root build:
+one. There is no root build:
 
 ```bash
 cd <service-dir> && mvn clean install     # build one service
@@ -33,9 +28,11 @@ cd <service-dir> && mvn test              # test one service
 cd <service-dir> && mvn spring-boot:run   # run one service
 ```
 
-`common` is a shared library (not a runnable service) consumed by `api-gateway` and `member-service`
-via `com.investorbook:common:0.0.1-SNAPSHOT`. Build and `install` it into the local `.m2` repo before
-building either of those, since there is no multi-module reactor to sequence it automatically:
+`common` is a shared library (not a runnable service) consumed by `auth-service` and the
+purchase-flow services via `com.investorbook:common:0.0.1-SNAPSHOT` (`api-gateway` does not
+depend on it — see "api-gateway" below for why). Build and `install` it into the
+local `.m2` repo before building any of those, since there is no multi-module reactor to sequence
+it automatically:
 
 ```bash
 cd common && mvn clean install
@@ -48,199 +45,191 @@ available). Don't assume `mvn test`/`mvn verify` works the same way across modul
 
 | Module | `mvn test` | `mvn verify` | Notes |
 |---|---|---|---|
-| `member-service` | **13 unit tests, no Docker** | +13 integration tests, **needs Docker** | See below |
-| `auth-service` | **5 unit tests, no Docker** | +8 integration tests, **needs Docker** | See below |
-| `api-gateway` | **2 unit tests, no Docker** | +5 integration tests, no Docker needed | See below |
-| `eureka-server` | **fails on JDK 17+** | same failure | See "JDK 21 incompatibility" below |
-| `resource-service` | **1 unit test, no Docker** | +4 integration tests, no Docker needed | See below |
-| `common` | **5 unit tests, no Docker** | same | Library; see "Shared error handling" below |
+| `auth-service` | **5 unit tests, no Docker** | +4 integration tests, **needs Docker** | See below |
+| `api-gateway` | **10 unit tests, no Docker** | +6 integration tests, no Docker needed | See below |
+| `eureka-server` | **1 unit test, no Docker** | same | See "eureka-server" below |
+| `common` | **4 unit tests, no Docker** | same | Library; see "Shared error handling" below |
 | `order-service` | **17 unit tests, no Docker** | +7 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 | `payment-service` | **7 unit tests, no Docker** | +6 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 | `invoice-service` | **8 unit tests, no Docker** | +5 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 | `notification-service` | **10 unit tests, no Docker** | +3 integration tests, **needs Docker** | See "Event-driven purchase flow" below |
 
-#### Shared error handling (common lib) — a real bug found while wiring it in
+#### Shared error handling (common lib)
 
-`common`'s `CustomizedResponseEntityExceptionHandler` (`@ControllerAdvice`, uniform
-`{timestamp, message, details}` error body) was previously only active in `member-service` — the
-other three services didn't scan `com.investorbook.common`, so its generic `Exception.class` →
-500 and `@Valid` → 400 mapping simply didn't apply there. Each of `auth-service`,
-`resource-service`, and `api-gateway`'s `*Application.java` now explicitly
-`@Import(CustomizedResponseEntityExceptionHandler.class)` (`auth-service`/`resource-service`
-needed the `common` dependency added for this — they didn't have it before). `api-gateway`'s
-`LoginService.login` also gained `@Valid` on its `AuthRequest` parameter, so `AuthRequest`'s
-existing `@NotNull`/`@Size` constraints are actually enforced now — previously they were declared
-but silently ignored, since nothing bound the request with validation switched on.
+`common`'s `CustomizedResponseEntityExceptionHandler` (`@ControllerAdvice`) gives every service a
+uniform `{timestamp, message, details}` error body: any uncaught exception maps to 500, and a
+failed `@Valid` (`MethodArgumentNotValidException`) maps to 400. Every service that wants it
+explicitly `@Import(CustomizedResponseEntityExceptionHandler.class)`s it in its `*Application.java`.
 
-Wiring the handler into `resource-service` immediately turned up a real, pre-existing bug (caught
-by `ResourceServiceApiIT`'s wrong-role test going from 403 to 500): the handler's
-`@ExceptionHandler(Exception.class)` catch-all was intercepting `AccessDeniedException` *inside*
-the `DispatcherServlet`, before Spring Security's own `ExceptionTranslationFilter` ever got a
-chance to turn it into a 403 — so every `@PreAuthorize` denial silently became a 500. Fixed by
-adding narrower `@ExceptionHandler` methods for `AccessDeniedException` and
-`AuthenticationException` that just rethrow, letting Spring's handler-resolution machinery prefer
-the more specific match and the exception propagate to the security filter chain as normal. This
-bug was **already live in `member-service` too** (inherited via `MemberResponseEntityExceptionHandler
-extends CustomizedResponseEntityExceptionHandler`) — nothing there had ever tested a wrong-role
-(as opposed to no-token) request against a `@PreAuthorize`'d endpoint. `MemberServiceApiIT` gained
-`member_isForbidden_forAValidTokenWithoutTheMemberRole` to close that gap and prove the real fix.
-`common` itself also has a `@Valid`/`BindException` override now (for `LoginService`'s implicit,
-unannotated-parameter form binding, which fails with `BindException` rather than
-`MethodArgumentNotValidException`), and got the same Boot 2.0.2 → 2.2.13/Hoxton.SR12 bump as the
-other four modules specifically so this could be given real JUnit 5 test coverage
-(`CustomizedResponseEntityExceptionHandlerTest`) for the first time.
+The one subtlety worth knowing if you touch this class: its `@ExceptionHandler(Exception.class)`
+catch-all would otherwise intercept `AccessDeniedException` *inside* the `DispatcherServlet`,
+before Spring Security's own `ExceptionTranslationFilter` ever gets a chance to turn it into a
+403 — silently turning every `@PreAuthorize` denial into a 500 instead. The fix is narrower
+`@ExceptionHandler` methods for `AccessDeniedException` and `AuthenticationException` that just
+rethrow, letting Spring's handler-resolution machinery prefer the more specific match and the
+exception propagate to the security filter chain as normal. Any service wiring this handler in
+for the first time should have a test proving a wrong-role (not just no-token) request against a
+`@PreAuthorize`'d endpoint actually gets a 403, not a 500 — that's the case this rethrow exists
+to protect.
 
-#### member-service: unit vs. integration tests, and Docker
+#### auth-service: a plain /login endpoint that signs its own JWT - not an OAuth2 provider
 
-`member-service` splits tests by Maven's own naming convention rather than mixing everything into
-Surefire: `*Test.java` (unit, mocked collaborators, no I/O) runs under Surefire during `mvn test`;
-`*IT.java` (real Postgres via Testcontainers, real S3 via LocalStack, or a full HTTP+security
-round trip) runs under Failsafe, bound to `integration-test`/`verify` only. This means **`mvn test`
-never touches Docker**, on this module or any other — only `mvn verify` (or a direct
-`mvn failsafe:integration-test`) does. If you add a new test class here, name it `*Test.java` for
-a fast, mocked-collaborator test or `*IT.java` for one that needs a real Postgres/S3/HTTP round
-trip — Surefire and Failsafe's default include patterns key off that suffix, so nothing else needs
-touching to keep the split working.
-
-```bash
-cd member-service && mvn test                                     # 13 tests, seconds, no Docker
-cd member-service && mvn verify                                   # +13 integration tests, needs Docker
-cd member-service && mvn test -Dtest=MemberServiceControllerTest  # one unit test class
-cd member-service && mvn failsafe:integration-test -Dit.test=MemberPersistenceIT  # one IT class
-```
-
-**Resilience**: `signUpMember`'s callback into api-gateway/auth-service (to mint the signup
-response's token) goes through `AuthenticationServiceClient`, not the raw `AuthenticationServiceProxy`
-Feign client directly — it wraps the call in a Resilience4j `@CircuitBreaker` (instance
-`authenticationService`, config in `application.properties`: opens after a 50%+ failure rate over
-a 4-call window) plus a Feign-level timeout (`feign.client.config.api-gateway.connectTimeout`/
-`readTimeout`, 2s each). By the time this call runs the new member row is already committed, so
-the fallback doesn't fail the whole request — it returns 202 with a token-less `AuthResponse`,
-meaning "your account exists, log in separately." `AuthenticationServiceCircuitBreakerIT` proves
-the circuit actually opens and short-circuits (not just "a failure returns a fallback"): it drives
-4 failures (each still calling the real, mocked-failing proxy) then asserts a 5th call gets the
-same graceful response *without* the proxy being invoked again. Needed an extra explicit
-`resilience4j-spring:1.7.1` dependency alongside `resilience4j-spring-boot2:1.7.1` — Hoxton's
-`spring-cloud-dependencies` BOM manages `resilience4j-spring` to an older `1.7.0`, and the
-mismatch fails at context-startup time (`NoSuchMethodError` on `SpelResolverConfiguration.
-spelResolver`), not at build time.
-
-If Testcontainers fails with "Could not find a valid Docker environment" on a 400 rather than a
-connection error, it's very likely the Docker-Engine-29+-vs-old-docker-java API version mismatch,
-not a real Docker problem — see `member-service/src/test/resources/docker-java.properties`, which
-already pins `api.version=1.44` for exactly this reason. Neither a `DOCKER_API_VERSION` env var nor
-a Surefire-injected system property reaches this check; only that properties file does.
-
-`mvn verify` also runs SpotBugs + FindSecBugs (bound to the `verify` phase, fast, fully offline —
-it runs regardless of whether Docker is available). Findings are triaged in
-`member-service/spotbugs-exclude.xml` with documented reasons — extend that file rather than
-adding a bare `@SuppressFBWarnings` with no justification, and never suppress a new finding
-without writing down why it's not a real issue. OWASP Dependency-Check is declared in the pom too
-but deliberately **not** bound to a lifecycle phase: without an `NVD_API_KEY` its first NVD sync
-can take hours under current rate limits. Run it explicitly when you have a key:
-
-```bash
-NVD_API_KEY=<key> mvn org.owasp:dependency-check-maven:check
-```
-
-#### auth-service: same Boot bump, a different JDK 21 fix that actually worked
-
-`auth-service` got the same Spring Boot 2.0.2 → 2.2.13 / Hoxton.SR12 bump as member-service, for
-the same reason (JUnit 5) plus a second one: it's the security core, so it's the highest-value
-service to test. Same `*Test`/`*IT` split, same Docker API pin in
+Same `*Test`/`*IT` split as every module in this repo, same Docker API pin in
 `auth-service/src/test/resources/docker-java.properties`.
 
 ```bash
 cd auth-service && mvn test                                  # 5 tests, seconds, no Docker
-cd auth-service && mvn verify                                 # +8 integration tests, needs Docker
+cd auth-service && mvn verify                                 # +4 integration tests, needs Docker
 ```
 
-Any `@SpringBootTest` here hits a JDK 21 failure too, but a different root cause from the one
-below: `@EnableAuthorizationServer`'s `AuthorizationServerSecurityConfigurer` eagerly builds a
-JAXB-based error message converter (unused — this app only speaks JSON), and jaxb-impl's
-reflective accessor optimization needs `ClassLoader.defineClass` open on JDK 16+, otherwise
-context startup fails with an NPE deep inside `jaxb-impl`'s `Injector`. Unlike the cglib case
-below, `--add-opens java.base/java.lang=ALL-UNNAMED` **does** fix this one — it's wired into both
-the Surefire and Failsafe plugin configs in `auth-service/pom.xml`, so `mvn test`/`mvn verify` just
-work without passing it manually. `AuthServiceTokenIT` proves the real OAuth2 password-grant flow
-end to end against a real Postgres member row: token issuance with a validly-signed, verifiable
-JWT; `invalid_grant` (400) for a wrong password or unknown user; a 401 (no JSON body — Spring
-Security's own Basic-auth entry point rejects an unrecognized client before OAuth2's error
-rendering runs) for an unknown client; `token_key` being publicly readable; and `check_token`
-requiring a trusted client's credentials.
+This service briefly went through two different OAuth2 rewrites - first onto Spring Authorization
+Server (the successor to the removed `@EnableAuthorizationServer`), which needed a custom
+grant-type extension since the framework deliberately doesn't implement the password grant this
+system's login flow depends on (dropped in OAuth 2.1). That worked, but for a system with exactly
+one first-party client (api-gateway, on the browser's behalf) and no third-party clients,
+multi-tenant client registration, consent screens, or token introspection/revocation needs, an
+OAuth2 *authorization server* framework is solving a much bigger problem than this one actually
+has. **Replaced with the much smaller thing this system actually needs**: `LoginController`
+authenticates the member (`DaoAuthenticationProvider`, same `MemberDetailsService`/BCrypt path
+every version of this service has used) and `JwtIssuer` signs a JWT directly with Nimbus JOSE - a
+`JWTClaimsSet.Builder` + `RSASSASigner`, no OAuth2 endpoint machinery, no client registry, no
+grant types. The whole replacement is two small classes.
 
-#### resource-service: same Boot bump, no JDK 21 test workaround needed
+**Nothing downstream changed.** `JwtIssuer` reproduces the exact same `user_name`/`authorities`
+claim shape every resource server in this repo (order-service, api-gateway) already reads, so
+`NimbusJwtDecoder`-based JWT *verification* everywhere else in the system is untouched - this
+was always purely an issuance-side simplification.
 
-`resource-service` got the same Boot 2.0.2 → 2.2.13 / Hoxton.SR12 bump, replacing its single
-generated JUnit 4 `contextLoads()` smoke test (which hit the cglib failure documented below).
-Unlike `auth-service`, it's a plain `@EnableResourceServer` (not an authorization server), so it
-never builds the JAXB-based error converter and needs no `--add-opens` at all — `mvn test`/`mvn
-verify` just work. One catch the bump surfaced: Hoxton's `spring-cloud-starter-security` no longer
-pulls `spring-security-oauth2` transitively (member-service gets it via the `common` lib instead;
-this module didn't depend on `common` at the time), so `spring-cloud-starter-oauth2` had to be
-added directly, matching what `auth-service` already declares — without it, `JwtConvertor.java`'s
-existing `OAuth2Authentication`/`DefaultAccessTokenConverter` usage doesn't even compile under
-Hoxton. (`common` was added as a dependency later, for the shared error handler — see "Shared
-error handling" above.)
+**Dropping OAuth2 also dropped the client-credentials concept entirely**, which cascaded into a
+real simplification at api-gateway too: no more `html5` client id/secret, no more Basic-auth
+header assembly, no more form-urlencoded request bodies for the internal auth-service call. See
+"api-gateway" below for the other half of this.
 
-`ResourceServiceApiIT` mints JWTs against a test signing key (no real dependency to exercise via
-Testcontainers here) and proves the actual filter chain: no token → 401, a valid token without
-`ROLE_MEMBER` → 403 (`@PreAuthorize` actually enforced, not just present in source), a valid token
-with the role → 200. `JwtConvertorTest` covers the claims-map-as-details behaviour `JwtUtil.getEmail`
-relies on downstream (see member-service's `MemberServiceController`).
+`/login` accepts a plain JSON body (`{"username", "password"}`) and returns
+`{"access_token": "..."}` - no `refresh_token`/`token_type`/`scope`/`jti` fields, since those are
+OAuth2-token-response conventions this system has no other use for (the frontend only ever read
+`access_token` from this response anyway). No refresh-token flow either: a token is valid for
+`investorbook.security.jwt.expiration` seconds (24h by default), and re-authenticating (not
+silently refreshing) is what happens after that - a deliberate simplification consistent with
+this system's stateless, no-session-store design; see ADR-002's "Consequences" for the tradeoff.
+
+`AuthServiceTokenIT` proves the real end-to-end flow against a real Postgres member row: token
+issuance with a validly-signed, verifiable JWT (Nimbus JOSE, verified against the fixed public
+key exactly the way a downstream resource server would); 401 for a wrong password or unknown
+user (`DaoAuthenticationProvider` throws an `AuthenticationException`, which `common`'s
+`CustomizedResponseEntityExceptionHandler` deliberately rethrows - see "Shared error handling"
+above - letting `SecurityConfiguration`'s own `AuthenticationEntryPoint` turn it into a 401
+rather than the generic handler flattening it to 500).
+
+#### api-gateway
+
+Spring Cloud Gateway (reactive, WebFlux/Netty), Spring Boot 4.1.1/Spring Cloud 2025.1.2 — the same
+generation every module is on now (see "Boot/Spring Cloud versions across modules" below), though
+api-gateway got there first, as its own dedicated migration. Because
+Spring Cloud Gateway is WebFlux/Netty only, everything in this module is reactive: security,
+every custom filter, and every outgoing HTTP call - there's no hybrid servlet/reactive mode.
+
+This module does not depend on `common`: `common` pulls in `spring-boot-starter-web` and other
+servlet-stack dependencies that conflict with a WebFlux app (risking Spring Boot detecting this
+as a servlet app instead of reactive), so api-gateway owns small local equivalents instead
+(`dto/AuthResponse`, `dto/LoginRequest` with `jakarta.validation` constraints).
+
+**Routing**: `GatewayRoutesConfig` defines an explicit route for `order-service`
+(`stripPrefix(1)`, so `/order-service/products` reaches order-service's own `/products` -
+the downstream service knows nothing about its gateway route prefix).
+
+**Security**: a reactive `SecurityWebFilterChain` (`ServerHttpSecurity`) verifies RSA-signed JWTs
+via `NimbusReactiveJwtDecoder.withPublicKey(...)`, bound to `investorbook.security.jwt.public.key`
+(matching every other resource-server-side service). No authorities/roles converter is configured:
+api-gateway has no method-level `@PreAuthorize` of its own (unlike order-service) - it only needs
+"is this a validly signed, unexpired JWT", with fine-grained role checks staying in the proxied
+services.
+
+**Filters**: `RequestLoggingFilter` (a Gateway `GlobalFilter`) logs every request actually routed
+to a downstream service - a `GlobalFilter` only runs for requests Gateway proxies, never this
+app's own locally-handled endpoints (`/login`, `/actuator/**`, `/dashboard/**`). `RateLimitFilter`
+needs to cover those local endpoints too, so it's registered as a plain WebFlux `WebFilter`
+instead (`config/RateLimitConfig.java`), ordered right after `CorsWebFilter`
+(`Ordered.HIGHEST_PRECEDENCE + 1`, so a rejected request still carries CORS headers) and ahead of
+Spring Security's reactive chain (so `permitAll()` routes are covered too). It caps requests per
+client IP via a keyed resilience4j `RateLimiter`; `RateLimitFilterTest` (unit,
+`MockServerWebExchange`) covers the limiter logic directly (allow, reject, per-client isolation);
+`RateLimitFilterIT` proves a real HTTP burst gets 429s with a `Retry-After` header once over a
+deterministically low configured limit - it swaps in a plain `SimpleClientHttpRequestFactory`
+first, since `TestRestTemplate`'s default Apache HttpClient5 client automatically retries a 429
+that carries a `Retry-After` header (correct real-client behaviour, but it means the test would
+otherwise observe the *retried* 200, not the immediate 429 it's trying to prove). In-memory,
+per-instance, keyed by remote address - see the class's own Javadoc for what that does and
+doesn't cover.
+
+**Error handling**: `WebFluxExceptionHandler` gives this module's own controllers the same
+`{timestamp, message, details}` shape every other service uses. Its `ErrorResponseException`
+handler preserves the exception's own status code rather than letting the generic
+`@ExceptionHandler(Exception.class)` catch-all flatten it to 500 - the same "don't let a broad
+handler mask a specific status" principle `common`'s shared handler follows for
+`AccessDeniedException`/`AuthenticationException` (see "Shared error handling" above).
+
+**Controllers are thin; `service/` holds the actual logic** - `LoginController`/`DashboardController`
+just map HTTP to a `service.LoginService`/`service.DashboardService` call (matching this repo's
+own Spring layering convention: "controller validates/translates the HTTP concern and delegates
+to a @Service"). Both services share one `WebClient` (`internalWebClient` bean, `WebClientConfig`),
+not a blocking HTTP client, since WebFlux needs non-blocking I/O throughout: `DashboardService`'s
+health checks run concurrently (`Flux.merge`-style fan-out), so one slow or dead service doesn't
+delay every check behind it. `LoginService` used to call `auth-service`'s OAuth2 token endpoint
+through a Feign client (`OauthServiceProxy`), offloaded to `boundedElastic` since Feign is
+fundamentally blocking - the only blocking call in an otherwise fully reactive app, and requiring
+a Basic-auth header built from an OAuth2 client id/secret. Now that auth-service has dropped
+OAuth2 entirely for a plain `/login` endpoint (see its own section above), this simplified twice
+over: `ReactiveDiscoveryClient.getInstances("auth-service").next()` + a plain `WebClient` POST of
+the *same* `LoginRequest` the controller received, as JSON, straight through - no Basic-auth
+header, no client secret, no form-encoded body, no `boundedElastic` offload (`WebClient` is
+non-blocking to begin with). Mirrors `DashboardService`'s own discovery-plus-WebClient pattern
+instead of introducing a second one - no `@LoadBalanced WebClient.Builder`/`lb://` scheme, since
+there's never more than one `auth-service` instance in this system and `.next()` on the
+discovered instances is already the simplest thing that's actually needed. Removed
+`spring-cloud-starter-openfeign`, `proxy/OauthServiceProxy`, `proxy/FormEncoderConfig`,
+`config/Html5ClientProperties`, `@EnableFeignClients`, and (once nothing was left to bind)
+`@ConfigurationPropertiesScan` entirely - nothing in this module uses Feign or knows about an
+OAuth2 client secret now.
+
+**Testing notes specific to this module's stack**: `TestRestTemplate` lives in its own module
+(`spring-boot-resttestclient`, package `org.springframework.boot.resttestclient`), and a
+`@SpringBootTest` that wants one injected needs an explicit `@AutoConfigureTestRestTemplate`.
+Mockito test doubles use `@org.springframework.test.context.bean.override.mockito.MockitoBean`/
+`MockitoSpyBean`. `ApiGatewaySecurityIT` mints its own RSA-signed test JWT via Nimbus JOSE
+directly, since `NimbusReactiveJwtDecoder` only verifies asymmetric signatures - it proves
+default-deny (401 without a token), token acceptance (a valid bearer token is not rejected by the
+gateway's own security layer), that `/login` bypasses security entirely so a client can obtain a
+token in the first place, and that a missing field gets a 400 in the shared error shape. `/login`
+itself is proven with `auth-service` mocked at the two seams that actually reach outside this
+process - a `@MockitoSpyBean ReactiveDiscoveryClient` (a spy, not a replacement bean: Spring
+Cloud's own `reactiveCompositeDiscoveryClient` is already `@Primary`, so a second `@Primary` bean
+of the same type is ambiguous rather than an override - a spy wraps the real bean in place
+instead, so every *other* service's lookup, notably `order-service`'s, keeps resolving to nothing
+exactly like production with Eureka disabled) stubbed to resolve `"auth-service"` to a fixed
+instance, and a `@Primary`-registered stub `WebClient` (there's no real `@Primary` conflict here,
+since `WebClientConfig`'s own bean isn't marked `@Primary`) that always answers with a canned
+`{"access_token":"access"}` regardless of the URL, since the discovery stub doesn't point
+anywhere real either. `service/LoginServiceTest` (unit, `ReactiveDiscoveryClient` mocked and
+`WebClient` stubbed at the `ExchangeFunction` seam, same pattern as `DashboardServiceTest`) proves
+the request targets the discovered instance's `/uaa/login` and the response is relayed back
+unchanged. `service/DashboardServiceTest` covers the health-aggregation logic directly - see
+"System dashboard" below.
+
+Confirmed by actually running `mvn verify` (10 unit + 6 integration tests, SpotBugs clean) and by
+driving a real standalone instance with curl: login validation, JWT-protected routes, the
+dashboard, and the rate limiter's 429s all confirmed live, not just in tests.
 
 ```bash
-cd resource-service && mvn test                                 # 1 test, seconds, no Docker
-cd resource-service && mvn verify                                # +4 integration tests, no Docker needed
+cd api-gateway && mvn test                                      # 10 tests, seconds, no Docker
+cd api-gateway && mvn verify                                     # +6 integration tests, no Docker needed
 ```
 
-#### api-gateway: same Boot bump, plus a real (not just test-time) runtime bug found and fixed
+#### eureka-server: migrated off the JDK-8-era stack it was generated with
 
-`api-gateway` got the same Boot 2.0.2 → 2.2.13 / Hoxton.SR12 bump (it was on
-`Finchley.BUILD-SNAPSHOT`, a snapshot train, before this). It's a resource server like
-`resource-service`, so it hits the same JAXB/`jaxb-impl` issue as `auth-service` — the
-`--add-opens` flag is wired into Surefire and Failsafe here too. `LoginService` was switched from
-field to constructor injection while adding its test; its `@Bean JwtAuthenticationConfig` factory
-method had to become `static` to avoid a circular self-dependency (the only bean definition for a
-constructor parameter can't depend on an instance of the bean being constructed) — a static
-`@Bean` method is invoked without needing an instance of its declaring class first.
-
-Actually running the bumped app standalone (not just its tests) surfaced a genuine dependency
-version mismatch that the test suite couldn't have caught, since both this module's and
-member-service's tests `@MockBean` away the Feign client that would trigger it:
-`spring-cloud-openfeign-core:2.2.9` (pulled in by Hoxton) transitively needs `feign-form-spring`
-built against `feign-form:3.8.0`, but both modules explicitly pinned `feign-form:3.3.0` (correct
-under the old Finchley/2.0.2 stack, stale after the bump) — Maven's nearest-wins mediation picked
-the stale pin, and the first real Feign form-encode call failed with `NoSuchMethodError` on
-`MultipartFormContentProcessor.addFirstWriter`. Fixed by bumping the pin to `3.8.0` in both
-`api-gateway/pom.xml` and `member-service/pom.xml`. The same standalone run also confirmed
-`mvn spring-boot:run` itself needs `--add-opens` on JDK 21 (not just the test JVMs) — added to
-`spring-boot-maven-plugin`'s `jvmArguments` in `api-gateway/pom.xml` (and worth doing for
-`auth-service` too if it's ever run directly rather than via an IDE/JDK-8 launch).
-
-`LoginServiceTest` (unit, mocked `OauthServiceProxy`) proves the Basic-auth header assembly that
-keeps the OAuth2 client secret off the wire to browser/mobile clients. `ApiGatewaySecurityIT`
-(real HTTP + filter chain, `OauthServiceProxy` mocked since auth-service isn't running in the
-test) proves default-deny (401 without a token), token acceptance (a valid bearer token is not
-rejected by the gateway's own security layer), that `/login` bypasses that security layer
-entirely so a client can obtain a token in the first place, and (once `@Valid` was added to
-`LoginService.login`, see "Shared error handling" above) that a missing field gets a 400 in the
-shared error shape. Deliberately does **not** test
-`/uaa/oauth/token` or `/member-service/signup` the same way: both are pure Zuul-proxied routes
-with no controller of their own in this app, and with Eureka disabled (as in every test here)
-Zuul can't resolve them, forwarding internally to an error dispatch that produces a 401 for
-reasons unrelated to the ignore-list — a real quirk of testing Zuul routes without a running
-Eureka, not a gap in what `/login` already proves about the ignore-list mechanism.
-
-```bash
-cd api-gateway && mvn test                                      # 2 tests, seconds, no Docker
-cd api-gateway && mvn verify                                     # +5 integration tests, no Docker needed
-```
-
-#### JDK 21 incompatibility in the untouched service
-
-`eureka-server` still fails its single generated `contextLoads()` smoke test on this JDK with the
-same root cause:
+`eureka-server` used to be the one module left on the Boot 2.0.2/Spring 5.0.6 stack it was
+originally generated with, and it failed its single generated `contextLoads()` smoke test on
+JDK 17+ with:
 
 ```
 IllegalStateException: Cannot load configuration class: PropertySourceBootstrapConfiguration
@@ -253,11 +242,28 @@ Caused by: CodeGenerationException: InaccessibleObjectException: Unable to make 
 Spring 5.0.6 (pulled in by Boot 2.0.2) generates cglib proxies via reflection on
 `ClassLoader.defineClass`, which the JPMS module system blocks from Java 16 onward without an
 explicit `--add-opens`. A quick `-DargLine="--add-opens java.base/java.lang=ALL-UNNAMED"` did
-**not** resolve it in a direct check — this needs either JDK 8/11 (what Boot 2.0.2 actually
-targets and was never validated past) or the same kind of Boot version bump the other modules got
-(see "Why member-service, auth-service, resource-service, api-gateway, and common are on a
-different Boot version"). Confirmed by actually running its tests, not inferred from the version
-number alone.
+**not** resolve it in a direct check — this needed either JDK 8/11 (what Boot 2.0.2 actually
+targets) or moving to a newer Boot generation. **Fixed by migrating to Spring Boot 4.1.1/Spring
+Cloud 2025.1.2**, the same generation every other module is now on (see "Boot/Spring Cloud
+versions across modules" below) — this removes the cglib proxying path entirely, exactly as it
+did for every other module's own migration. The only other changes this needed:
+`spring-boot-starter-actuator` had to be declared explicitly (no longer pulled in transitively on
+this Spring Cloud version, same gotcha the Eureka *client* starter already had) and
+`management.endpoints.web.exposure.include=health,info,metrics` was added for consistency with
+every other service. Confirmed by actually running its tests and then driving a real standalone
+instance's registration API with curl, not inferred from the version number alone.
+
+One Windows-specific gotcha this surfaced once eureka-server could actually run: on this machine
+Eureka registered every client under its Windows network hostname (e.g.
+`DESKTOP-XXXX.mshome.net`, from the Mobile Hotspot/Hyper-V default switch), which isn't
+resolvable via DNS here. Eureka itself reported every instance as UP, but any server-to-server
+call resolved through the registry - api-gateway calling auth-service to log in, the dashboard's
+health aggregation - failed with an `UnknownHostException`/`WebClientRequestException`, and
+silently rather than loudly (a login through the gateway came back `200` with an empty body,
+since the reactive chain resolving `auth-service` just completed empty). Fixed with
+`eureka.instance.prefer-ip-address=true` on every Eureka client (not just eureka-server itself),
+which makes each one register its IP instead - what a container/VM deployment would already look
+like, so this is purely a local-Windows-dev concern.
 
 ### Running the full system locally
 
@@ -265,21 +271,19 @@ Start order matters because services register with and discover each other throu
 
 1. `eureka-server` (port **8761**) — naming server, dashboard at `http://localhost:8761/`
 2. PostgreSQL reachable at `jdbc:postgresql://localhost/investorbook` (user `postgres` / pass `pass`)
-   — required by `auth-service`, `member-service`, and all four purchase-flow services
+   — required by `auth-service` and all four purchase-flow services
    (`spring.jpa.hibernate.ddl-auto=update`, so schema is created/updated automatically, no
    migration tool)
-3. `auth-service` (port **9100**, context path `/uaa`) — OAuth2/JWT authorization server
-4. `member-service` (port **8100**)
-5. `resource-service` (port **9200**) — currently just a `/hi` smoke-test endpoint
-6. `api-gateway` (port **8765**) — Zuul edge router, the only service meant to be called externally
-7. Kafka reachable at `localhost:9092` (`docker compose up -d` at the repo root) — required by the
+3. `auth-service` (port **9100**, context path `/uaa`) — authenticates members and issues JWTs
+   (not an OAuth2 authorization server, see its own section below); seeds one demo member on
+   first startup (`DemoMemberSeeder` - there's no signup flow, see "Accounts" in `README.md`)
+4. `api-gateway` (port **8765**) — Spring Cloud Gateway edge router, the only service meant to be
+   called externally
+5. Kafka reachable at `localhost:9092` (`docker compose up -d` at the repo root) — required by the
    purchase-flow services: `order-service` (port **8200**), `payment-service` (port **8300**),
    `invoice-service` (port **8400**), `notification-service` (port **8500**); see "Event-driven
    purchase flow" below. Order doesn't matter between these four beyond Kafka/Postgres being up
    first - they only talk to each other over Kafka, never directly.
-
-`api-gateway`, `eureka-server`, and `resource-service` still only have the default Spring Boot
-`contextLoads()` smoke test generated by `start.spring.io`.
 
 ## Architecture
 
@@ -287,99 +291,85 @@ Start order matters because services register with and discover each other throu
 
 - **eureka-server** — Netflix Eureka naming/discovery server. Nothing else registers with it as a
   peer (`eureka.client.register-with-eureka=false`).
-- **auth-service** — Spring Cloud OAuth2 **authorization server** (`@EnableAuthorizationServer`).
-  Issues JWTs signed with an RSA keypair hardcoded in `application.properties`. Authenticates
-  against the `members` Postgres table via `MemberDetailsService` (implements Spring's
-  `UserDetailsService`), using its own minimal `MemberEntity` (id/email/passwordHash only — a
-  separate class from `member-service`'s richer entity of the same name, kept intentionally
-  decoupled). Grants roles via `GrantedAuthorities` (`NORMAL_USER` → `ROLE_MEMBER`, `PREMIUM_USER`
-  adds `ROLE_PREMIUMMEMBER`, `ADMIN` adds `ROLE_ADMIN`), though only `NORMAL_USER` is ever assigned
-  today.
-- **member-service** — the main business service: signup, profile get/update, and profile-picture
-  upload/download (delegating storage to S3 via `common`'s `ProfilePictureStorage`). Owns
-  `MemberEntity` (JPA, Postgres) with a `@OneToOne` `AddressEntity` sharing its primary key via
-  `@MapsId`. `@EnableResourceServer` protects everything except `/signup` (opened via
-  `WebSecurity.ignoring()`), with method-level `@PreAuthorize("hasRole('MEMBER')")` on the rest.
-  **Signup is a two-hop flow**: `MemberServiceController.signUpMember` saves the new member (linking
-  `address.setMember(member)` first — required for the `@MapsId` cascade to work at all), then calls
-  back out to `api-gateway`'s `/login` through `AuthenticationServiceClient` (a circuit-breaker-
-  and-timeout-wrapped `AuthenticationServiceProxy` Feign client — see "Resilience" under member-service's
-  testing section) to obtain a token, so a client only calls member-service once and gets a JWT
-  back. See "Why member-service, auth-service, resource-service, api-gateway, and common are on a
-  different Boot version" below for why this and three other modules (plus `common`) are on
-  Spring Boot 2.2.13 / JUnit 5 while `eureka-server` isn't.
-- **resource-service** — skeletal `@EnableResourceServer` example service (single `/hi` endpoint) —
-  a template for adding new protected microservices, not a real feature.
-- **api-gateway** — Zuul (`@EnableZuulProxy`) reverse proxy and single external entry point.
-  `SecurityConfiguration` requires authentication on every route except `/login`,
-  `/uaa/oauth/token`, and `/member-service/signup` (matched via Zuul's routing prefix). Exposes
-  `POST /login` (`LoginService`), which base64-encodes the `html5` OAuth client credentials and
-  forwards the user's username/password to `auth-service`'s token endpoint via
-  `OauthServiceProxy` (Feign) — so browser/mobile clients never see the OAuth client secret.
-  `ZuulLoggingFilter` logs every proxied request (`pre` filter, order 1).
-- **common** — shared library, not a service. Holds cross-cutting pieces every module reuses:
-  - `dto/AuthRequest`, `dto/AuthResponse` — the OAuth2 password-grant request/response shape shared
-    between api-gateway and auth-service.
+- **auth-service** — authenticates members and issues JWTs; not an OAuth2 authorization server
+  (see its own section above for why, after briefly being one). `LoginController` is a thin HTTP
+  layer delegating to `service.LoginService`, which authenticates via `MemberDetailsService`/BCrypt
+  and has `JwtIssuer` sign the token directly with Nimbus JOSE, using the RSA private key in
+  `application.properties`. Authenticates against the `members` Postgres table via
+  `MemberDetailsService` (implements Spring's `UserDetailsService`), using its own
+  minimal `MemberEntity` (id/email/passwordHash only). Grants roles via `GrantedAuthorities`
+  (`NORMAL_USER` → `ROLE_MEMBER`, `PREMIUM_USER` adds `ROLE_PREMIUMMEMBER`, `ADMIN` adds
+  `ROLE_ADMIN`), though only `NORMAL_USER` is ever assigned today. `DemoMemberSeeder` seeds one
+  fixed demo member on first startup (idempotent, same pattern as order-service's
+  `ProductCatalogSeeder`) — the only account-provisioning mechanism this system has; there's no
+  signup flow (see "Accounts" in `README.md`).
+- **api-gateway** — Spring Cloud Gateway (reactive, WebFlux/Netty) reverse proxy and single
+  external entry point — see "api-gateway" below for the full architecture.
+  `SecurityConfiguration`'s reactive `SecurityWebFilterChain` requires a valid JWT on every route
+  except `/login`, `/actuator/**`, `/order-service/products/**`, and `/dashboard/**`. Exposes
+  `POST /login` (`LoginController`, delegating to `service.LoginService`), which resolves
+  `auth-service` via `ReactiveDiscoveryClient` and forwards the user's username/password to its
+  `/login` endpoint as plain JSON through a `WebClient` — no client secret involved on either
+  side now (see "api-gateway" below).
+  `RequestLoggingFilter` (a Gateway
+  `GlobalFilter`) logs every request actually routed to a downstream service; `GatewayRoutesConfig`
+  defines that route explicitly (`order-service`, `stripPrefix(1)`) rather than using Gateway's
+  discovery locator, which needs its own predicate/filter SpEL config to auto-generate a route per
+  Eureka-registered service.
+- **common** — shared library, not a service. Holds cross-cutting pieces every remaining module
+  reuses (`auth-service` and the four purchase-flow services — `api-gateway` has its own local
+  equivalents instead, see "api-gateway" above):
   - `util/JwtUtil` — pulls the authenticated user's email (`user_name` claim) off the Spring Security
     `Authentication` via `OAuth2AuthenticationDetails`; this is how resource servers identify "the
-    current user" from a decoded JWT without a separate lookup.
-  - `util/CoreFeignConfiguration` — registers a form-encoding `Encoder` so Feign clients can POST
-    `application/x-www-form-urlencoded` bodies (needed for the OAuth2 token endpoint).
+    current user" from a decoded JWT without a separate lookup. Still live in `order-service`.
   - `util/EncryptionUtil` — PBKDF2WithHmacSHA512 password hashing helper (currently unused in favor
-    of `BCryptPasswordEncoder` in `auth-service`/`member-service` — check before assuming it's live).
-  - `aws/ProfilePictureStorage` + `aws/S3Config` — profile-picture upload/presigned-URL helper,
-    constructor-injected with an `AmazonS3` client (so it's testable against LocalStack) rather than
-    the static, eagerly-initialized utility it used to be. `S3Config` is a plain `@Configuration`
-    class living outside the consuming service's component-scan root, so it must be pulled in
-    explicitly with `@Import(S3Config.class)` (member-service's `MemberServiceApplication` does
-    this) — it won't be picked up by scanning alone.
+    of `BCryptPasswordEncoder` in `auth-service` — check before assuming it's live).
   - `exception/CustomizedResponseEntityExceptionHandler` — a `@ControllerAdvice` mapping any
     uncaught exception to 500 and `MethodArgumentNotValidException`/`BindException` (the two
     shapes a failed `@Valid` can take) to 400, with a uniform `{timestamp, message, details}`
     body throughout. Explicitly rethrows `AccessDeniedException`/`AuthenticationException`
     rather than handling them — see "Shared error handling" for the real 403-became-500 bug that
-    omission caused. Every service now `@Import`s this (`member-service` gets it transitively via
-    its own `MemberResponseEntityExceptionHandler extends` it instead).
+    omission caused. Every remaining service `@Import`s this.
 
 ### Security model (the architectural throughline)
 
-This is an OAuth2 **password grant + JWT** setup, not session-based auth:
+Username/password + JWT, not session-based auth and not OAuth2 (see auth-service's own section
+above for why this system doesn't use an OAuth2 authorization server):
 
 1. A client sends username/password to `api-gateway`'s `POST /login`.
-2. `api-gateway` adds the `html5` client's Basic-auth credentials and forwards to `auth-service`'s
-   `/uaa/oauth/token` (Spring's standard OAuth2 token endpoint).
-3. `auth-service` validates the user against Postgres, issues a JWT signed with its private RSA key
-   (`investorbook.security.jwt.private.key`) containing the `user_name` claim and granted roles.
-4. Every other service (`api-gateway`'s protected routes, `member-service`, `resource-service`) is
-   an `@EnableResourceServer` that verifies the same JWT using the **public** key
-   (`security.oauth2.resource.jwt.key-value` / `investorbook.security.jwt.public.key`) —
-   the identical PEM string is duplicated across every `application.properties` file as the
-   fallback of a `${JWT_PUBLIC_KEY:...}` placeholder (same pattern for the DB password
-   `${DB_PASSWORD:...}` and the html5 client secret `${HTML5_CLIENT_SECRET:...}` /
-   `${HTML5_CLIENT_SECRET_HASH:...}` — see "Config & secrets" below). Changing the keypair for
-   real still means updating every service's env var in lockstep; the placeholder only removes
-   the "it's a literal in source" problem, not the duplication itself.
-5. All resource servers are `SessionCreationPolicy.STATELESS` — no server-side session state
-   anywhere; authorization is entirely re-derived from the JWT on each request.
+2. `api-gateway` resolves `auth-service` via Eureka and forwards the credentials to its `/login`
+   as plain JSON - no client id/secret on either side, since there's no OAuth2 client to
+   authenticate.
+3. `auth-service` validates the user against Postgres (`service.LoginService`/`MemberDetailsService`),
+   then signs a JWT directly with Nimbus JOSE (`JwtIssuer`) using its private RSA key
+   (`investorbook.security.jwt.private.key`), containing the `user_name` claim and granted roles.
+4. Every other resource server (`order-service`'s protected routes via a `JwtAuthenticationConverter`-
+   based `SecurityFilterChain`, `api-gateway`'s reactive `SecurityWebFilterChain`) verifies the
+   same JWT using the **public** key (`investorbook.security.jwt.public.key` everywhere except
+   auth-service itself, which only ever needs the private half) — the identical PEM string is
+   duplicated across every other `application.properties` file as the fallback of a
+   `${JWT_PUBLIC_KEY:...}` placeholder (same pattern for the DB password `${DB_PASSWORD:...}` —
+   see "Config & secrets" below). Changing the keypair for real still means updating every
+   service's env var in lockstep; the placeholder only removes the "it's a literal in source"
+   problem, not the duplication itself.
+5. All resource servers are `SessionCreationPolicy.STATELESS` (or, for `api-gateway`, the reactive
+   stack's stateless-by-default equivalent) — no server-side session state anywhere; authorization
+   is entirely re-derived from the JWT on each request. There's no refresh-token flow either: a
+   token is valid for `investorbook.security.jwt.expiration` seconds (24h by default), and
+   re-authenticating is what happens after that - see ADR-002's "Consequences" for the tradeoff.
 
-Each service's own `SecurityConfiguration` class governs its own routes; there is no shared/inherited
-security config module, so a newly added service must supply its own (`resource-service` is the
-template for this). `member-service`'s `MemberServiceApiIntegrationTest` proves this chain actually
-works end-to-end (401 with no token, 404 with a valid token and no matching account, `@PreAuthorize`
-enforced) by minting a JWT directly against a test signing key — see that test's class Javadoc for
-why it doesn't depend on `auth-service` being up.
+Each service's own `SecurityConfiguration` class governs its own routes; there is no
+shared/inherited security config module, so a newly added service must supply its own —
+`order-service`'s is a good starting template now.
 
 ### Config & secrets
 
 Every literal secret that used to sit directly in an `application.properties` value is now
 `${ENV_VAR:same-literal-as-before}` — the fallback preserves today's behaviour exactly (no env
 var set anywhere in dev/test), while a real deployment overrides it: `DB_USERNAME`/`DB_PASSWORD`
-(`auth-service`, `member-service`), `JWT_PUBLIC_KEY` (all four resource-server-side services),
-`JWT_PRIVATE_KEY` (`auth-service` only, since only it signs), `HTML5_CLIENT_SECRET`
-(`api-gateway`'s plaintext copy) and `HTML5_CLIENT_SECRET_HASH` (`auth-service`'s BCrypt copy of
-the *same* secret — two different env vars because one is a hash and one isn't). The comment
-that used to sit right above `auth-service`'s BCrypt hash revealing its plaintext
-(`#html5secretpass123`) is gone; that line existed purely to defeat the point of hashing it. No
+(`auth-service`), `JWT_PUBLIC_KEY` (both resource-server-side services), and `JWT_PRIVATE_KEY`
+(`auth-service` only, since only it signs). No client secret exists anywhere in this system -
+dropping OAuth2 dropped that concept entirely (see auth-service's own section above). No
 `.env`/secrets-manager integration is wired in here — see the README's "Config & secrets" section
 for what a real deployment would use instead.
 
@@ -397,46 +387,40 @@ done here to keep the demo's moving parts down. Every touched service's IT suite
 `actuatorHealth_isReachableWithoutAToken` test proving the carve-out actually works, not just
 that the property is set.
 
-### Security scanning (Phase 3): SpotBugs + FindSecBugs + OWASP Dependency-Check on every module
+### Security scanning: SpotBugs + FindSecBugs + OWASP Dependency-Check on every module
 
-Every module except `eureka-server` now has the same two static-analysis/CVE-scan plugins
-member-service originally pioneered, bound the same way: SpotBugs+FindSecBugs bound to `verify`
-(fast, offline, so it runs on every build), OWASP Dependency-Check declared but deliberately
-**not** bound to a lifecycle phase (see member-service's "unit vs. integration tests" section
-above for why — the first NVD sync without an API key is too slow to be a build-blocking
-default). Each module has its own `spotbugs-exclude.xml`; every triage entry names the specific
-class/method and states a reason, never a blanket suppression.
+Every module except `eureka-server` has the same two static-analysis/CVE-scan plugins, bound the
+same way: SpotBugs+FindSecBugs bound to `verify` (fast, offline, so it runs on every build),
+OWASP Dependency-Check declared but deliberately **not** bound to a lifecycle phase (the first
+NVD sync without an API key is too slow to be a build-blocking default). Each module has its own
+`spotbugs-exclude.xml`; every triage entry names the specific class/method and states a reason,
+never a blanket suppression.
 
-Running this across eight modules that had never been scanned before turned up a genuinely mixed
-set of findings — some real bugs worth fixing, some deliberate design choices worth naming
-instead of "fixing":
+A genuinely mixed set of findings across modules — some real bugs worth fixing, some deliberate
+design choices worth naming instead of "fixing":
 
-- **Real fixes made**: a missing `serialVersionUID` (`auth-service`'s `InvestorBookUser`); a
-  `File.delete()` return value silently ignored, meaning a failed cleanup would leave a temp
-  upload file on disk forever (`common`'s `ProfilePictureStorage`); `Date` fields returned/stored
-  by reference in `common`'s `ExceptionResponse` (a shared value type touched by every service's
-  error responses) — fixed with defensive copies rather than suppressed, since `Date` is
-  genuinely mutable and the fix is two lines; `EncryptionUtil.hash` catching bare `Exception` when
-  only `NoSuchAlgorithmException`/`InvalidKeySpecException` are actually possible; reliance on
-  the JVM's default platform encoding in `api-gateway`'s `LoginService` (`String.getBytes()` with
-  no explicit charset when Base64-encoding the OAuth2 client's Basic-auth header — a real
-  portability footgun, fixed with an explicit `UTF_8`); a non-locale-aware `toUpperCase()` on a
-  generated invoice number in `invoice-service` (fixed with `Locale.ROOT`, since it's uppercasing
-  hex characters in an identifier, not user-facing text); and CRLF-log-injection findings on every
-  Kafka listener that logged an event id or order id without sanitizing it first (`order-service`,
-  `payment-service`, `invoice-service`, `notification-service` — the *fields themselves* are
-  legitimately attacker-influenced if a producer were ever compromised, unlike the one
-  false-positive case below) plus one in `api-gateway`'s `ZuulLoggingFilter` logging a raw request
-  URI.
+- **Real fixes made**: a missing `serialVersionUID` (`auth-service`'s `InvestorBookUser`); `Date`
+  fields returned/stored by reference in `common`'s `ExceptionResponse` (a shared value type
+  touched by every service's error responses) — fixed with defensive copies rather than
+  suppressed, since `Date` is genuinely mutable and the fix is two lines; `EncryptionUtil.hash`
+  catching bare `Exception` when only `NoSuchAlgorithmException`/`InvalidKeySpecException` are
+  actually possible; a non-locale-aware `toUpperCase()` on a generated invoice number in
+  `invoice-service` (fixed with `Locale.ROOT`, since it's uppercasing hex characters in an
+  identifier, not user-facing text); reliance on the JVM's default platform encoding
+  (`String.getBytes()` with no explicit charset) in `api-gateway`'s `RateLimitFilter` — fixed with
+  an explicit `UTF_8`; and CRLF-log-injection findings on every Kafka listener that logged an
+  event id or order id
+  without sanitizing it first (`order-service`, `payment-service`, `invoice-service`,
+  `notification-service` — the *fields themselves* are legitimately attacker-influenced if a
+  producer were ever compromised, unlike the one false-positive case below).
 - **Triaged as deliberate, not suppressed blind**: `SPRING_CSRF_PROTECTION_DISABLED` on
   `auth-service` and `api-gateway`'s `SecurityConfiguration` — both are stateless, bearer-token
   APIs (`SessionCreationPolicy.STATELESS`); CSRF exploits rely on a browser automatically
   attaching a *cookie/session* to a forged cross-site request, and there is no cookie/session
   here for one to ride along on. `EI_EXPOSE_REP2` on every class that constructor-injects a
-  `KafkaTemplate` (a Spring-managed connection/client object, not a value type — there is nothing
-  meaningful to "defensively copy") and on `api-gateway`'s `LoginService` storing its
-  `JwtAuthenticationConfig` (a `@Value`-populated config bean, populated once at startup and never
-  mutated in this app's actual usage).
+  `KafkaTemplate` or an HTTP client (`api-gateway`'s `DashboardService`/`LoginService` storing a
+  `WebClient`) — a Spring-managed connection/client object, not a value type; there is nothing meaningful to
+  "defensively copy".
 - **A genuine tool limitation, documented rather than worked around further**:
   `order-service`'s `OrderEventListener.transitionIfExpected` still trips `CRLF_INJECTION_LOGS` on
   its 3-arg `logger.info(String, Object...)` call *after* the exact same `sanitizeForLog(String)`
@@ -450,42 +434,68 @@ instead of "fixing":
   hold a CR/LF; the finding is spurious). The fix is cheap and needs no suppression entry: log
   `sanitizeForLog(amount.toPlainString())` instead of the raw `BigDecimal`.
 
-Confirmed by actually running `mvn verify` on all nine modules after every fix — including
-re-running `member-service` (unchanged, but `common` moved under it) and reinstalling `common`
-into the local `.m2` before re-verifying every consumer — not assumed from a clean-looking diff.
+Confirmed by actually running `mvn verify` on every module after every fix — including
+reinstalling `common` into the local `.m2` before re-verifying every consumer — not assumed from
+a clean-looking diff.
 
-### Why member-service, auth-service, resource-service, api-gateway, and common are on a different Boot version
+### Boot/Spring Cloud versions across modules
 
-`member-service` was bumped from Spring Boot 2.0.2 to **2.2.13** (Spring Cloud `Hoxton.SR12`)
-specifically to get JUnit 5 as the default in `spring-boot-starter-test`, before any test suite was
-written for it — Boot 2.0.2's bundled Surefire (2.21.0) predates JUnit Platform support entirely.
-`auth-service`, `resource-service`, `api-gateway`, and (later still, for the same reason, once it
-got its first-ever tests) `common` all got the identical bump. Only `eureka-server` remains
-deliberately untouched: none of these modules are runnable services it shares a JAR with, so
-there's no cross-module coupling to the version bump — if it ever gets its own test suite, expect
-to hit the same overrides. Two follow-on overrides were needed on every bumped module to make the
-JDK on this machine (21) actually work with the upgraded test stack: `mockito.version` (Boot 2.2's
-managed Mockito predates JDK 17+ bytecode support) and, less obviously, `byte-buddy.version`
-(Boot's BOM otherwise still pins byte-buddy to a version too old for the overridden Mockito, which
-fails at mock-creation time with `NoClassDefFoundError`, not at build time). `common` also lost
-its `spring-snapshots` repository declaration in the bump — it depended on it only for
-`Finchley.BUILD-SNAPSHOT`, a moving-target snapshot train that `Hoxton.SR12` (a real release)
-doesn't need.
+Every module now runs Spring Boot 4.1.1/Spring Cloud 2025.1.2 on JDK 21 - `api-gateway` got there
+first (its own dedicated Zuul→Gateway migration), `common` plus the five servlet-stack modules
+(`auth-service`, `order-service`, `payment-service`, `invoice-service`, `notification-service`)
+followed in one initiative, `auth-service` last since its `@EnableAuthorizationServer` needed a
+real rewrite (see its own section above), not a version bump, and `eureka-server` - the one
+module left on the JDK-8-era stack it was originally generated with - came last of all (see its
+own section above for why that one specifically had been left untouched, and the JDK 21 failure
+that finally forced it).
+
+A few Boot4-migration gotchas worth knowing if you touch any of these modules again, found across
+all seven migrations, not just one:
+- **Kafka autoconfiguration relocated**: `KafkaTemplate` and friends moved out of
+  `spring-boot-autoconfigure` into their own `spring-boot-starter-kafka`/`spring-boot-starter-kafka-test`
+  artifacts - depending on plain `spring-kafka`/`spring-kafka-test` still compiles, but nothing
+  autoconfigures the beans, and startup fails with `NoSuchBeanDefinitionException` on
+  `KafkaTemplate`, not a compile error.
+- **`TestRestTemplate` relocated** into its own `spring-boot-resttestclient` module
+  (`org.springframework.boot.resttestclient.TestRestTemplate`, not `...test.web.client`), and its
+  autoconfiguration (`@AutoConfigureTestRestTemplate`, now in
+  `org.springframework.boot.resttestclient.autoconfigure`) needs `RestTemplateBuilder` on the
+  classpath too (`spring-boot-starter-restclient`, also relocated out of `spring-boot-starter-web`)
+  or context startup fails with `NoClassDefFoundError` on `RestTemplateBuilder` - only shows up on
+  a servlet (non-reactive) app, which is why api-gateway's own migration didn't hit it.
+- **`KafkaTestUtils.getRecords(consumer, timeout)` flipped from `long` millis to `Duration`**, the
+  opposite of what an older revision of this file documented as a gotcha for the previous Kafka
+  test library version - always check the actual overload rather than trusting a stale comment.
+- **`spring-hateoas`'s `PagedModel` constructor became `protected`** - use the `PagedModel.of(...)`
+  static factory instead of `new PagedModel<>(...)`.
+- **Mockito/byte-buddy version overrides are gone.** Every Boot 2.2.13 module needed
+  `mockito.version`/`byte-buddy.version` `pom.xml` overrides to work on JDK 21 (Boot 2.2's managed
+  Mockito predates JDK 17+ bytecode support, and Boot's BOM otherwise pinned byte-buddy too old
+  for the overridden Mockito). Boot 4.1.1 manages both at compatible versions already - removed
+  from every migrated module's `pom.xml`, and no longer needed on a new one either.
+- **`--add-opens java.base/java.lang=ALL-UNNAMED` is gone too.** Needed under the old stack for
+  two unrelated reasons (`auth-service`/`api-gateway`'s JAXB-based error converter under
+  `@EnableAuthorizationServer`/`@EnableResourceServer`; cglib proxying under Spring 5.0.6 for
+  `eureka-server`, see its own section above) - Spring Security 7's removal of the legacy OAuth2
+  support removed the JAXB path entirely, and Boot 4.1.1's newer Spring/cglib version doesn't need
+  the reflective access the old one did.
+- **`spring-milestones` repository declarations are gone** from every migrated module's `pom.xml` -
+  they existed only for `Finchley.BUILD-SNAPSHOT`, a moving-target snapshot train Hoxton.SR12 (and
+  now 2025.1.2) never needed.
 
 ### Naming and package quirks to know about
 
-- Two independent `com.investorbook.<x>.security.SecurityConfiguration` classes exist (in
-  `member-service` and `resource-service`) plus a differently-named `JwtConvertor` in several
-  modules (including `order-service`) — same intent, not shared code, don't assume editing one
-  affects another.
-- `resource-service`'s package is `com.investorbook.resourceservice.secuirty` (misspelled) —
-  intentional-looking but easy to typo again when adding files there.
-- `auth-service` and `member-service` each define their own `MemberEntity` mapped to the same
-  `members` table with different column subsets — by design (auth only needs id/email/password
-  hash), not a duplication bug to merge. `auth-service`'s `MemberEntity` has no `@GeneratedValue`
-  on its `String id`, and until `AuthServiceTokenIT` needed to seed one, there was no way to
-  construct a persistable instance at all — the 3-arg constructor `(id, email, passwordHash)` was
-  added for that.
+- Three independent `com.investorbook.<x>.security.SecurityConfiguration` classes exist
+  (`auth-service`, `api-gateway`, `order-service`) — same intent, not shared code, don't assume
+  editing one affects another. `order-service`'s JWT verification lives directly in its
+  `SecurityConfiguration` now (a `JwtAuthenticationConverter` bean, `setAuthoritiesClaimName`/
+  `setAuthorityPrefix("")` since auth-service's JWT already embeds `ROLE_`-prefixed authorities
+  under a literal `authorities` claim) - the separate `JwtConvertor` class this used to delegate
+  to was removed as part of the Boot4 migration, folded into `SecurityConfiguration` itself.
+- `auth-service`'s `MemberEntity` (id/email/passwordHash only — just what authentication needs)
+  has no `@GeneratedValue` on its `String id`; until `AuthServiceTokenIT` needed to seed one and
+  `DemoMemberSeeder` needed to seed another, there was no way to construct a persistable instance
+  at all — the 3-arg constructor `(id, email, passwordHash)` was added for that.
 
 ## Event-driven purchase flow (order/payment/invoice/notification-service)
 
@@ -662,7 +672,7 @@ report under `target/` for that message before assuming the test logic is wrong.
 `frontend/` is a React storefront UI (Vite + TypeScript + Tailwind CSS v4, React Router, plain
 React Context for cart/auth state - no Redux/Zustand, no CSS-in-JS). It's **not a Maven module and
 not registered with Eureka**: it's a browser client that calls `api-gateway` directly over CORS,
-same as any other external client of this system, not something Zuul proxies requests through.
+same as any other external client of this system, not something Gateway proxies requests through.
 Design source: [Figma](https://www.figma.com/design/WskdCUCFg3FfpHQtq40uZu/InvestorBook-Store-UI)
 (catalog grid, login, cart, order-status screens - indigo/slate palette, Inter). See
 `frontend/README.md` for the stack, the exact endpoints it calls, and what's deliberately not
@@ -679,13 +689,13 @@ sites rather than repeated here in full:
   (`POST /orders`) does. The catalog was added to `order-service` rather than as a new service or
   module, since it already owns the purchasing domain and the Postgres/JPA wiring.
 - **`api-gateway` gained CORS support** (`config/CorsConfig`) plus `/order-service/products/**`
-  added to its own ignore-list, mirroring how `/member-service/signup` was already ignored - the
-  gateway's own auth layer, not just order-service's, has to let the public catalog route through.
-  CORS is registered as a standalone `CorsFilter` bean at `Ordered.HIGHEST_PRECEDENCE`, **not**
-  via `HttpSecurity.cors()` - `WebSecurity.ignoring()` (used for every public route: `/products`,
-  `/actuator/**`, `/dashboard/**`) bypasses Spring Security's whole filter chain, which would skip
-  a `.cors()`-registered filter too and leave those exact routes without CORS headers even though
-  they're the ones a browser calls without a token. Found by testing the real browser flow, not by
+  added to its own permitAll allowlist - the gateway's own auth layer, not just order-service's,
+  has to let the public catalog route through. CORS is registered as a standalone `CorsWebFilter`
+  bean at `Ordered.HIGHEST_PRECEDENCE`, **not** via the security DSL's own CORS support - a
+  `permitAll()`/`WebSecurity.ignoring()`-style route bypasses Spring Security's whole filter
+  chain, which would skip a security-DSL-registered CORS filter too and leave those exact routes
+  without CORS headers even though they're the ones a browser calls without a token. Found by
+  testing the real browser flow, not by
   inspection - see CorsConfig's Javadoc. Allowed origins are
   `investorbook.security.cors.allowed-origins` (`${CORS_ALLOWED_ORIGINS:...}`, defaulting to the
   Vite dev server's `http://localhost:5173`), following the same `${ENV_VAR:default}` pattern as
@@ -727,19 +737,20 @@ side. Two backend additions support it:
   having committed offsets) did not retroactively backfill `OrderPlaced`/`PaymentSucceeded`/etc.
   for those same old orders - expected, not a bug, but confusing if you don't know to expect it.
 - **`api-gateway` gained a health-aggregation endpoint**, `DashboardController`'s
-  `GET /dashboard/services` (public, same ignore-list reasoning as `/actuator/**` itself). A
-  browser can't reach any of the nine services directly - different origins/ports, and only
+  `GET /dashboard/services` (public, same allowlist reasoning as `/actuator/**` itself),
+  delegating to `service.DashboardService` for the actual aggregation. A
+  browser can't reach any of the seven services directly - different origins/ports, and only
   `api-gateway` has a CORS policy - so this app calls each one's own `/actuator/health`
-  server-to-server instead, resolving addresses through Eureka's `DiscoveryClient` rather than
-  hardcoded ports (`eureka-server` is the one unavoidable exception: `eureka.client.register-with-
-  eureka=false` means it can't be discovered through itself, so its `localhost:8761` address is
-  hardcoded). Needed a short-timeout `RestTemplate` bean (`config/RestTemplateConfig`, 1s
-  connect/read) so one dead service can't make the whole dashboard call hang. Two real bugs
-  surfaced only by actually calling this live (not by inspection) and are worth knowing about if
-  you touch this again:
+  server-to-server instead, resolving addresses through Eureka's `ReactiveDiscoveryClient` rather
+  than hardcoded ports (`eureka-server` is the one unavoidable exception: `eureka.client.register-
+  with-eureka=false` means it can't be discovered through itself, so its `localhost:8761` address
+  is hardcoded). Needed a short-timeout `WebClient` bean (`config/WebClientConfig`, 1s
+  connect/response timeout, non-blocking since this module's stack is reactive throughout) so one
+  dead service can't make the whole dashboard call hang. Two real bugs surfaced only by actually
+  calling this live (not by inspection) and are worth knowing about if you touch this again:
   - `auth-service` is the only service with a non-root `server.servlet.context-path` (`/uaa`), so
     its actuator health lives at `/uaa/actuator/health`, not `/actuator/health` - the only other
-    per-service override in `DashboardController` (`HEALTH_PATH_OVERRIDES`) besides eureka-server.
+    per-service override in `DashboardService` (`HEALTH_PATH_OVERRIDES`) besides eureka-server.
   - `notification-service` depends on `spring-boot-starter-mail`, which auto-configures a
     `MailHealthIndicator` that pings the configured SMTP host - the harmless `localhost:2525`
     placeholder nothing listens on in a normal local run (see "Event-driven purchase flow" above).
