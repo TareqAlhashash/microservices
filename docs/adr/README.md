@@ -6,7 +6,7 @@ downsides). These are demo-scale decisions, not claims of a production-perfect s
 | ADR | Decision |
 |---|---|
 | [001](001-service-discovery-and-gateway.md) | Eureka + an API gateway, not direct service calls |
-| [002](002-oauth2-authentication.md) | OAuth2 password grant + JWT, with a role-based access model |
+| [002](002-oauth2-authentication.md) | Username/password + a signed JWT, with a role-based access model |
 | [003](003-shared-common-library.md) | A shared `common` library, with a deliberately narrow scope |
 | [004](004-per-service-data-ownership.md) | Per-service table ownership on a shared Postgres instance |
 | [005](005-event-driven-choreography.md) | Choreography, not orchestration, for the purchase saga |
@@ -14,3 +14,4 @@ downsides). These are demo-scale decisions, not claims of a production-perfect s
 | [007](007-idempotency-strategy.md) | Idempotent consumers, via two mechanisms depending on available state |
 | [008](008-saga-compensation.md) | A real compensating action on payment failure |
 | [009](009-aws-deployment-architecture.md) | Target AWS deployment: Fargate, Multi-AZ, MSK, CloudFront+WAF |
+| [010](010-compensation-after-payment.md) | Compensating actions for every saga step after payment: void the invoice, refund, cancel |

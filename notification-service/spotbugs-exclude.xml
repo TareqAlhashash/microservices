@@ -3,7 +3,7 @@
     <!--
     SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
     (@RestController / a Feign client interface Spring proxies as one), not a report of a
-    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    specific defect - see common/spotbugs-exclude.xml for the fuller rationale.
     -->
     <Match>
         <Bug pattern="SPRING_ENDPOINT" />

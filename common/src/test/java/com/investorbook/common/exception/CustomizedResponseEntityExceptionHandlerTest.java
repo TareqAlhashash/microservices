@@ -12,7 +12,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.BeanPropertyBindingResult;
-import org.springframework.validation.BindException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.context.request.WebRequest;
 
@@ -32,10 +31,12 @@ class CustomizedResponseEntityExceptionHandlerTest {
 	/**
 	 * The Exception.class catch-all above would otherwise intercept @PreAuthorize
 	 * denials before Spring Security's own ExceptionTranslationFilter can turn
-	 * them into a 403 - this must rethrow, not handle, the exception. Found by
-	 * resource-service's ResourceServiceApiIT turning up a real 500-instead-of-403
-	 * regression the moment this handler was wired into a service that actually
-	 * exercises @PreAuthorize.
+	 * them into a 403 - this must rethrow, not handle, the exception. Found by a
+	 * wrong-role integration test turning up a real 500-instead-of-403 regression
+	 * the moment this handler was wired into a service that actually exercises
+	 * @PreAuthorize (originally resource-service's ResourceServiceApiIT, since removed
+	 * along with that service - order-service's own @PreAuthorize'd endpoints are the
+	 * live proof of this now).
 	 */
 	@Test
 	void handleAccessDenied_rethrowsRatherThanHandlingIt() {
@@ -66,26 +67,6 @@ class CustomizedResponseEntityExceptionHandlerTest {
 		ExceptionResponse body = (ExceptionResponse) response.getBody();
 		assertThat(body.getMessage()).isEqualTo("validation failed");
 		assertThat(body.getDetails()).contains("username cannot be null");
-	}
-
-	/**
-	 * @Valid on an implicit (unannotated) form-backed parameter - api-gateway's
-	 * LoginService.login - fails with BindException rather than
-	 * MethodArgumentNotValidException; both must produce the same response shape.
-	 */
-	@Test
-	void handleBindException_returns400WithTheSameShapeAsMethodArgumentNotValid() {
-		BeanPropertyBindingResult bindingResult = new BeanPropertyBindingResult(new Object(), "authRequest");
-		bindingResult.rejectValue(null, "required", "password must be at least 6 char long");
-		BindException ex = new BindException(bindingResult);
-
-		ResponseEntity<Object> response = handler.handleBindException(ex, new HttpHeaders(), HttpStatus.BAD_REQUEST,
-				mock(WebRequest.class));
-
-		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
-		ExceptionResponse body = (ExceptionResponse) response.getBody();
-		assertThat(body.getMessage()).isEqualTo("validation failed");
-		assertThat(body.getDetails()).contains("password must be at least 6 char long");
 	}
 
 	@SuppressWarnings("unused")

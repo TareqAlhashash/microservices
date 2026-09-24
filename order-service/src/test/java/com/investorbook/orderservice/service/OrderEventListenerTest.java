@@ -2,6 +2,8 @@ package com.investorbook.orderservice.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -13,13 +15,19 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.investorbook.common.event.InvoiceFailed;
 import com.investorbook.common.event.InvoiceIssued;
+import com.investorbook.common.event.InvoiceVoided;
+import com.investorbook.common.event.NotificationFailed;
 import com.investorbook.common.event.OrderCompleted;
 import com.investorbook.common.event.PaymentFailed;
+import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.orderservice.dao.OrderRepository;
 import com.investorbook.orderservice.dao.entities.OrderEntity;
@@ -31,11 +39,14 @@ class OrderEventListenerTest {
 	@Mock
 	private OrderRepository orderRepository;
 
+	@Mock
+	private OrderEventLogRecorder eventLogRecorder;
+
 	private OrderEventListener listener;
 
 	@BeforeEach
 	void setUp() {
-		listener = new OrderEventListener(orderRepository);
+		listener = new OrderEventListener(orderRepository, eventLogRecorder);
 	}
 
 	private static OrderEntity orderWithStatus(OrderStatus status) {
@@ -55,6 +66,7 @@ class OrderEventListenerTest {
 		ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
 		verify(orderRepository).save(saved.capture());
 		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.PAID);
+		verify(eventLogRecorder).record(eq("order-1"), eq("PaymentSucceeded"), anyString());
 	}
 
 	@Test
@@ -106,6 +118,65 @@ class OrderEventListenerTest {
 		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.COMPLETED);
 	}
 
+	private static PaymentRefunded paymentRefunded() {
+		return new PaymentRefunded("evt-7", "order-1", "jane@example.com", new BigDecimal("50.00"),
+				"invoice could not be issued", Instant.now());
+	}
+
+	/**
+	 * The refund can outrun the order's own PaymentSucceeded/InvoiceIssued
+	 * transitions (they arrive on different topics, so Kafka guarantees no
+	 * ordering between them), so a cancel has to be accepted from any of the
+	 * pre-terminal statuses, not just the one the happy path would normally be in.
+	 */
+	@ParameterizedTest
+	@EnumSource(value = OrderStatus.class, names = { "PLACED", "PAID", "INVOICED" })
+	void onPaymentRefunded_cancelsAnOrderThatHasNotReachedATerminalStatus(OrderStatus current) {
+		OrderEntity order = orderWithStatus(current);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		ArgumentCaptor<OrderEntity> saved = ArgumentCaptor.forClass(OrderEntity.class);
+		verify(orderRepository).save(saved.capture());
+		assertThat(saved.getValue().getStatus()).isEqualTo(OrderStatus.CANCELLED);
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = OrderStatus.class, names = { "COMPLETED", "PAYMENT_FAILED", "CANCELLED" })
+	void onPaymentRefunded_isANoOp_whenTheOrderIsAlreadyTerminal(OrderStatus current) {
+		OrderEntity order = orderWithStatus(current);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onPaymentRefunded_isIgnored_forAnUnknownOrder() {
+		when(orderRepository.findById("order-1")).thenReturn(Optional.empty());
+
+		listener.onPaymentRefunded(paymentRefunded());
+
+		verify(orderRepository, never()).save(any());
+	}
+
+	/**
+	 * A PaymentSucceeded/InvoiceIssued that arrives after the cancel (the
+	 * cross-topic race above, other way round) must not resurrect the order.
+	 */
+	@Test
+	void aLatePaymentSucceeded_doesNotResurrectACancelledOrder() {
+		OrderEntity order = orderWithStatus(OrderStatus.CANCELLED);
+		when(orderRepository.findById("order-1")).thenReturn(Optional.of(order));
+
+		listener.onPaymentSucceeded(
+				new PaymentSucceeded("evt-8", "order-1", "jane@example.com", new BigDecimal("50.00"), Instant.now()));
+
+		verify(orderRepository, never()).save(any());
+	}
+
 	@Test
 	void anEventForAnUnknownOrder_isIgnored() {
 		when(orderRepository.findById("missing")).thenReturn(Optional.empty());
@@ -113,6 +184,39 @@ class OrderEventListenerTest {
 		listener.onPaymentSucceeded(
 				new PaymentSucceeded("evt-6", "missing", "jane@example.com", new BigDecimal("50.00"), Instant.now()));
 
+		verify(orderRepository, never()).save(any());
+	}
+
+	/**
+	 * InvoiceFailed/NotificationFailed/InvoiceVoided don't change this order's own status
+	 * (payment-service/invoice-service react to them instead) - these three are audit-only,
+	 * recorded for the dashboard's event timeline without touching the repository at all.
+	 */
+	@Test
+	void onInvoiceFailed_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onInvoiceFailed(
+				new InvoiceFailed("evt-9", "order-1", "jane@example.com", new BigDecimal("600.00"),
+						"above the invoicing limit", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("InvoiceFailed"), anyString());
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onNotificationFailed_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onNotificationFailed(new NotificationFailed("evt-10", "order-1", "jane@example.com",
+				new BigDecimal("50.00"), "INV-0001", "undeliverable address", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("NotificationFailed"), anyString());
+		verify(orderRepository, never()).save(any());
+	}
+
+	@Test
+	void onInvoiceVoided_recordsTheEvent_withoutTransitioningTheOrder() {
+		listener.onInvoiceVoided(new InvoiceVoided("evt-11", "order-1", "jane@example.com", new BigDecimal("50.00"),
+				"INV-0001", "notification could not be delivered", Instant.now()));
+
+		verify(eventLogRecorder).record(eq("order-1"), eq("InvoiceVoided"), anyString());
 		verify(orderRepository, never()).save(any());
 	}
 }

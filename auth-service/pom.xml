@@ -14,20 +14,15 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.2.13.RELEASE</version>
+		<version>4.1.1</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<java.version>1.8</java.version>
-		<spring-cloud.version>Hoxton.SR12</spring-cloud.version>
-		<!-- Same overrides member-service needed for the same Boot version on JDK 21:
-		     Boot 2.2's managed Mockito predates JDK 17+ bytecode support, and Boot's BOM
-		     otherwise pins byte-buddy to a version too old for the overridden Mockito. -->
-		<mockito.version>5.11.0</mockito.version>
-		<byte-buddy.version>1.14.13</byte-buddy.version>
+		<java.version>21</java.version>
+		<spring-cloud.version>2025.1.2</spring-cloud.version>
 		<testcontainers.version>1.19.8</testcontainers.version>
 	</properties>
 
@@ -37,34 +32,27 @@
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
 
-		<!-- shared error-response shape (CustomizedResponseEntityExceptionHandler) -->
+		<!-- AuthenticationManager/PasswordEncoder/UserDetailsService plumbing, plus a minimal
+		     SecurityFilterChain - not an OAuth2 authorization server (see security/JwtIssuer's
+		     Javadoc for why this app doesn't use one). -->
 		<dependency>
-			<groupId>com.investorbook</groupId>
-			<artifactId>common</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-security</artifactId>
+		</dependency>
+		<!-- Signs the JWT this service issues (see security/JwtIssuer) - not pulled in
+		     transitively without spring-security-oauth2-jose/an OAuth2 starter, neither of which
+		     this module has any other reason to depend on. -->
+		<dependency>
+			<groupId>com.nimbusds</groupId>
+			<artifactId>nimbus-jose-jwt</artifactId>
+			<version>10.4.2</version>
 		</dependency>
 
-		 <dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-oauth2</artifactId>
-		</dependency> 
-
-		<dependency>
-		    <groupId>org.springframework.security</groupId>
-		    <artifactId>spring-security-jwt</artifactId>
-		    <version>1.0.9.RELEASE</version>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-security</artifactId>
-		</dependency>
-		
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
 		</dependency>
-		
+
 		<!-- JPA -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -77,21 +65,37 @@
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
 		</dependency>
-		
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>
-		
+
+		<dependency>
+			<groupId>com.investorbook</groupId>
+			<artifactId>common</artifactId>
+			<version>0.0.1-SNAPSHOT</version>
+		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- TestRestTemplate moved out of spring-boot-test into its own module as of Boot 4 -
+		     org.springframework.boot.resttestclient.TestRestTemplate, not ...test.web.client.
+		     Its autoconfiguration needs RestTemplateBuilder (spring-boot-starter-restclient,
+		     also relocated out of spring-boot-starter-web) on the classpath, or context startup
+		     fails with NoClassDefFoundError on RestTemplateBuilder. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-devtools</artifactId>
-			<scope>runtime</scope>
+			<artifactId>spring-boot-starter-restclient</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-resttestclient</artifactId>
+			<scope>test</scope>
 		</dependency>
 
 		<!-- integration test container: real Postgres for the token-issuance flow -->
@@ -132,14 +136,11 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
-			<!-- Same *Test (Surefire) / *IT (Failsafe) split as member-service: mvn test
+			<!-- Same *Test (Surefire) / *IT (Failsafe) split as every module in this repo: mvn test
 			     never touches Docker, only mvn verify does. -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-failsafe-plugin</artifactId>
-				<configuration>
-					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
-				</configuration>
 				<executions>
 					<execution>
 						<goals>
@@ -148,19 +149,6 @@
 						</goals>
 					</execution>
 				</executions>
-			</plugin>
-			<!-- Spring Security OAuth2's AuthorizationServerSecurityConfigurer eagerly builds a
-			     JAXB-based error message converter (unused - this app only speaks JSON), and
-			     jaxb-impl's reflective accessor optimization needs ClassLoader.defineClass open
-			     on JDK 16+, otherwise context startup fails with an NPE deep in jaxb-impl. Needed
-			     for any @SpringBootTest here, unlike member-service's JDK issue (a different root
-			     cause - see CLAUDE.md's "JDK 21 incompatibility" section on the untouched services). -->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<configuration>
-					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
-				</configuration>
 			</plugin>
 			<!-- Static analysis for known insecure code patterns (injection, weak crypto,
 			     path traversal, etc.). Fast and offline, so it runs on every verify. -->
@@ -208,14 +196,4 @@
 			</plugin>
 		</plugins>
 	</build>
-	<repositories>
-		<repository>
-			<id>spring-milestones</id>
-			<name>Spring Milestones</name>
-			<url>https://repo.spring.io/milestone</url>
-			<snapshots>
-				<enabled>false</enabled>
-			</snapshots>
-		</repository>
-	</repositories>
 </project>

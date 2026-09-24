@@ -16,12 +16,12 @@ spring-boot:run` per service and no infrastructure beyond one Postgres instance.
    stand up, but recreates a single relational monolith underneath a microservices facade, the
    thing this pattern exists to avoid.
 2. **One Postgres instance per service.** The textbook answer, and what a real deployment should
-   do, but multiplies local setup from "one Postgres" to "nine," for no benefit at demo scale
+   do, but multiplies local setup from "one Postgres" to "seven," for no benefit at demo scale
    where nothing here needs independent scaling or failure isolation.
 3. **One shared Postgres instance, but every service owns its own tables exclusively** (the
-   option taken): `auth-service`/`member-service` each have their own `MemberEntity` mapped to
-   the same `members` table with different column subsets (see ADR-003) but neither ever
-   queries a table it doesn't own; each purchase-flow service has its own tables (`orders`,
+   option taken): `auth-service` owns the `members` table exclusively via its own `MemberEntity`
+   (see ADR-003 - this system used to also have `member-service` sharing that same table via its
+   own, richer entity, since removed); each purchase-flow service has its own tables (`orders`,
    `processed_events`, one instance per service, not shared, `invoices`) and the four services
    never query each other's tables at all, only exchange Kafka events.
 
@@ -43,8 +43,8 @@ service's tables.
   bottleneck across every service that uses it, and nothing stops a future contributor from
   accidentally querying another service's table. There's no database-level permission boundary
   enforcing what this ADR describes, only convention. A real deployment would give each service
-  (or at least each bounded context, `auth`+`member` arguably share one closely enough to
-  debate) its own database instance or schema with actual grants restricting cross-access.
+  (or at least each bounded context) its own database instance or schema with actual grants
+  restricting cross-access.
 - The purchase-flow services could have shared a single `processed_events` table with a
   `service_name` discriminator column instead of one per service; four separate tables were
   chosen so each service's idempotency state is trivially its own migration to own, move, or

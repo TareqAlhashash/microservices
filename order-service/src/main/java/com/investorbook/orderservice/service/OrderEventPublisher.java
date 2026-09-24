@@ -14,9 +14,11 @@ import com.investorbook.orderservice.dao.entities.OrderEntity;
 public class OrderEventPublisher {
 
 	private final KafkaTemplate<String, Object> kafkaTemplate;
+	private final OrderEventLogRecorder eventLogRecorder;
 
-	public OrderEventPublisher(KafkaTemplate<String, Object> kafkaTemplate) {
+	public OrderEventPublisher(KafkaTemplate<String, Object> kafkaTemplate, OrderEventLogRecorder eventLogRecorder) {
 		this.kafkaTemplate = kafkaTemplate;
+		this.eventLogRecorder = eventLogRecorder;
 	}
 
 	/**
@@ -28,5 +30,7 @@ public class OrderEventPublisher {
 		OrderPlaced event = new OrderPlaced(UUID.randomUUID().toString(), order.getId(), order.getCustomerEmail(),
 				order.getAmount(), Instant.now());
 		kafkaTemplate.send(Topics.ORDER_PLACED, order.getId(), event);
+		eventLogRecorder.record(order.getId(), "OrderPlaced",
+				"saga: order placed for $" + order.getAmount() + ", publishing OrderPlaced");
 	}
 }

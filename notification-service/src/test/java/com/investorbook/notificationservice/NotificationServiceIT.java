@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import javax.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMessage;
 
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -76,8 +76,7 @@ class NotificationServiceIT {
 	private KafkaTemplate<String, Object> kafkaTemplate;
 
 	private Consumer<String, String> newConsumer(String groupId, String topic) {
-		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId,
-				"true");
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId, true);
 		consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -88,7 +87,7 @@ class NotificationServiceIT {
 
 	private static List<ConsumerRecord<String, String>> recordsForOrder(Consumer<String, String> consumer,
 			String topic, String orderId, Duration timeout) {
-		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout.toMillis());
+		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout);
 		List<ConsumerRecord<String, String>> matching = new ArrayList<>();
 		for (ConsumerRecord<String, String> record : polled.records(topic)) {
 			if (record.key().equals(orderId)) {
@@ -151,5 +150,29 @@ class NotificationServiceIT {
 			}
 		}
 		assertThat(emailsToRecipient).isEqualTo(1);
+	}
+
+	/**
+	 * The notification step's real failure, end to end against a real Kafka and
+	 * a real SMTP server: an address that can never receive mail publishes
+	 * NotificationFailed (which starts the void-invoice and refund chain), no
+	 * mail is sent, and OrderCompleted is NOT published.
+	 */
+	@Test
+	void anUndeliverableRecipient_publishesNotificationFailed_andNeverOrderCompleted() throws Exception {
+		String orderId = UUID.randomUUID().toString();
+		publishInvoiceIssued(UUID.randomUUID().toString(), orderId, "not-an-email-address", "INV-CCCC3333");
+
+		try (Consumer<String, String> failed = newConsumer("test-notification-failed-1", Topics.NOTIFICATION_FAILED);
+				Consumer<String, String> completed = newConsumer("test-order-completed-3", Topics.ORDER_COMPLETED)) {
+			await().atMost(Duration.ofSeconds(15))
+					.until(() -> !recordsForOrder(failed, Topics.NOTIFICATION_FAILED, orderId, Duration.ofSeconds(2))
+							.isEmpty());
+			assertThat(recordsForOrder(completed, Topics.ORDER_COMPLETED, orderId, Duration.ofSeconds(3))).isEmpty();
+		}
+		// other tests in this class do send mail, so look only for this order's invoice
+		for (MimeMessage message : greenMail.getReceivedMessages()) {
+			assertThat(message.getSubject()).doesNotContain("INV-CCCC3333");
+		}
 	}
 }

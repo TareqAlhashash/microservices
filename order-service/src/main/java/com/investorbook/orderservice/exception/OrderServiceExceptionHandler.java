@@ -11,7 +11,6 @@ import org.springframework.web.context.request.WebRequest;
 
 import com.investorbook.common.exception.CustomizedResponseEntityExceptionHandler;
 import com.investorbook.common.exception.ExceptionResponse;
-import com.investorbook.orderservice.service.OrderNotFoundException;
 
 @ControllerAdvice
 @RestController
@@ -19,6 +18,13 @@ public class OrderServiceExceptionHandler extends CustomizedResponseEntityExcept
 
 	@ExceptionHandler(OrderNotFoundException.class)
 	public final ResponseEntity<Object> handleOrderNotFoundException(Exception ex, WebRequest request) {
+		ExceptionResponse exceptionResponse = new ExceptionResponse(new Date(), ex.getMessage(),
+				request.getDescription(false));
+		return new ResponseEntity<>(exceptionResponse, HttpStatus.NOT_FOUND);
+	}
+
+	@ExceptionHandler(ProductNotFoundException.class)
+	public final ResponseEntity<Object> handleProductNotFoundException(Exception ex, WebRequest request) {
 		ExceptionResponse exceptionResponse = new ExceptionResponse(new Date(), ex.getMessage(),
 				request.getDescription(false));
 		return new ResponseEntity<>(exceptionResponse, HttpStatus.NOT_FOUND);

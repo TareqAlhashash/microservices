@@ -1,62 +1,50 @@
 package com.investorbook.authservice.security;
 
-import javax.servlet.http.HttpServletResponse;
-
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.builders.WebSecurity;
-import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
 
+import jakarta.servlet.http.HttpServletResponse;
 
+/**
+ * This service's whole HTTP surface: /login (LoginController, authenticates and issues a JWT -
+ * see JwtIssuer) and /actuator/**, kept unauthenticated for the same reason as every other
+ * service in this repo (a health-check probe or metrics scraper doesn't carry this app's own
+ * bearer token). No OAuth2 authorization-server endpoints - see JwtIssuer's Javadoc for why.
+ */
 @Configuration
-@EnableWebSecurity
-public class SecurityConfiguration extends WebSecurityConfigurerAdapter {
-
-		
-	@Autowired
-	MemberDetailsService memberDetailsService;
+public class SecurityConfiguration {
 
 	@Bean
-	public PasswordEncoder encoder() {
+	public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+		http.csrf(csrf -> csrf.disable())
+				.authorizeHttpRequests(authorize -> authorize.requestMatchers("/login", "/actuator/**").permitAll()
+						.anyRequest().authenticated())
+				.exceptionHandling(
+						exceptions -> exceptions.authenticationEntryPoint((request, response, authenticationException) -> response
+								.sendError(HttpServletResponse.SC_UNAUTHORIZED)))
+				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS));
+		return http.build();
+	}
+
+	@Bean
+	public PasswordEncoder passwordEncoder() {
 		return new BCryptPasswordEncoder();
 	}
 
-	@Override
-	protected void configure(AuthenticationManagerBuilder auth) throws Exception {
-		auth.userDetailsService(memberDetailsService).passwordEncoder(encoder());
-	}
-
-	@Override
-	public void configure(WebSecurity web) throws Exception {
-		// See member-service's SecurityConfiguration for why this is unauthenticated.
-		web.ignoring().antMatchers("/actuator/**");
-	}
-
-	@Override
-	protected void configure(HttpSecurity http) throws Exception {
-		http.csrf().disable()
-        .logout().disable()
-        .formLogin().disable()
-        .anonymous().and()
-        .exceptionHandling().authenticationEntryPoint(
-                (req, rsp, e) -> rsp.sendError(HttpServletResponse.SC_UNAUTHORIZED))
-        .and()
-        .authorizeRequests().anyRequest().authenticated().and().sessionManagement()
-		.sessionCreationPolicy(SessionCreationPolicy.STATELESS);
-
-	}
-
-	@Override
+	// Used directly by LoginController to authenticate the member (email + password) - the same
+	// UserDetailsService/BCrypt path every version of this service has used.
 	@Bean
-	public AuthenticationManager authenticationManagerBean() throws Exception {
-		return super.authenticationManagerBean();
+	public DaoAuthenticationProvider daoAuthenticationProvider(UserDetailsService memberDetailsService,
+			PasswordEncoder passwordEncoder) {
+		DaoAuthenticationProvider provider = new DaoAuthenticationProvider(memberDetailsService);
+		provider.setPasswordEncoder(passwordEncoder);
+		return provider;
 	}
 }

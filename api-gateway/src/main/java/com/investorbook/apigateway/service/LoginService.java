@@ -1,43 +1,32 @@
 package com.investorbook.apigateway.service;
 
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
+import org.springframework.cloud.client.discovery.ReactiveDiscoveryClient;
+import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClient;
 
-import javax.validation.Valid;
+import com.investorbook.apigateway.dto.AuthResponse;
+import com.investorbook.apigateway.dto.LoginRequest;
 
-import org.springframework.context.annotation.Bean;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RestController;
+import reactor.core.publisher.Mono;
 
-import com.investorbook.apigateway.config.JwtAuthenticationConfig;
-import com.investorbook.apigateway.proxy.OauthServiceProxy;
-import com.investorbook.common.dto.AuthRequest;
-import com.investorbook.common.dto.AuthResponse;
-
-@RestController
+/**
+ * Forwards a login attempt to auth-service and relays its response back - the whole login use
+ * case, kept out of LoginController so the controller stays a thin HTTP translation layer.
+ */
+@Service
 public class LoginService {
 
-	private final OauthServiceProxy oauthServiceProxy;
+	private final ReactiveDiscoveryClient discoveryClient;
+	private final WebClient webClient;
 
-	private final JwtAuthenticationConfig config;
-
-	public LoginService(OauthServiceProxy oauthServiceProxy, JwtAuthenticationConfig config) {
-		this.oauthServiceProxy = oauthServiceProxy;
-		this.config = config;
+	public LoginService(ReactiveDiscoveryClient discoveryClient, WebClient internalWebClient) {
+		this.discoveryClient = discoveryClient;
+		this.webClient = internalWebClient;
 	}
 
-	@Bean
-	public static JwtAuthenticationConfig jwtConfig() {
-		return new JwtAuthenticationConfig();
-	}
-
-	@PostMapping(path = "/login", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE)
-	public ResponseEntity<AuthResponse> login(@Valid AuthRequest authRequest) {
-		authRequest.setGrantType("password");
-		String encodedAuth = Base64.getEncoder().encodeToString(
-				(config.getHtml5ClientId() + ":" + config.getHtml5ClientSecret()).getBytes(StandardCharsets.UTF_8));
-		return ResponseEntity.ok(oauthServiceProxy.login("Basic " + encodedAuth, authRequest.toFormParams()));
+	public Mono<AuthResponse> login(LoginRequest request) {
+		return discoveryClient.getInstances("auth-service").next()
+				.flatMap(instance -> webClient.post().uri(instance.getUri() + "/uaa/login").bodyValue(request)
+						.retrieve().bodyToMono(AuthResponse.class));
 	}
 }
