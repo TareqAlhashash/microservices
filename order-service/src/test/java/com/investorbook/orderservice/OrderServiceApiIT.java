@@ -4,9 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
 import java.math.BigDecimal;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateKey;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
+import java.util.Date;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -18,9 +24,10 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.hateoas.PagedModel;
 import org.springframework.http.HttpEntity;
@@ -30,13 +37,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.AuthorityUtils;
-import org.springframework.security.oauth2.common.DefaultOAuth2AccessToken;
-import org.springframework.security.oauth2.common.OAuth2AccessToken;
-import org.springframework.security.oauth2.provider.OAuth2Authentication;
-import org.springframework.security.oauth2.provider.OAuth2Request;
-import org.springframework.security.oauth2.provider.token.store.JwtAccessTokenConverter;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.containers.KafkaContainer;
@@ -52,6 +52,11 @@ import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.common.event.Topics;
 import com.investorbook.orderservice.dto.OrderResponse;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 
 /**
  * Proves order-service's half of the purchase saga against a real Postgres
@@ -69,12 +74,15 @@ import com.investorbook.orderservice.dto.OrderResponse;
  * and consumer sides here, each other service's reaction to its trigger
  * event in its own suite) proves the same thing without it.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = { "eureka.client.enabled=false",
-		"security.oauth2.resource.jwt.key-value=test-signing-secret-please-ignore" })
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "eureka.client.enabled=false")
+@AutoConfigureTestRestTemplate
 @Testcontainers
 class OrderServiceApiIT {
 
-	private static final String SIGNING_KEY = "test-signing-secret-please-ignore";
+	// NimbusJwtDecoder.withPublicKey only verifies asymmetric (RSA) signatures - unlike the old
+	// resource server this replaced, which could be pointed at a plain HMAC secret for a quick
+	// test override (see api-gateway's ApiGatewaySecurityIT for the same reasoning).
+	private static final KeyPair KEY_PAIR = generateRsaKeyPair();
 
 	@Container
 	private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:15-alpine");
@@ -92,6 +100,7 @@ class OrderServiceApiIT {
 		registry.add("spring.datasource.username", POSTGRES::getUsername);
 		registry.add("spring.datasource.password", POSTGRES::getPassword);
 		registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+		registry.add("investorbook.security.jwt.public.key", OrderServiceApiIT::publicKeyPem);
 	}
 
 	@Autowired
@@ -100,19 +109,32 @@ class OrderServiceApiIT {
 	@Autowired
 	private KafkaTemplate<String, Object> kafkaTemplate;
 
+	private static KeyPair generateRsaKeyPair() {
+		try {
+			KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+			generator.initialize(2048);
+			return generator.generateKeyPair();
+		} catch (Exception e) {
+			throw new IllegalStateException(e);
+		}
+	}
+
+	private static String publicKeyPem() {
+		String base64 = Base64.getEncoder().encodeToString(KEY_PAIR.getPublic().getEncoded());
+		return "-----BEGIN PUBLIC KEY-----\n" + base64 + "\n-----END PUBLIC KEY-----";
+	}
+
 	private static String tokenFor(String email) {
-		JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
-		converter.setSigningKey(SIGNING_KEY);
-
-		OAuth2Request request = new OAuth2Request(Collections.emptyMap(), "html5", Collections.emptyList(), true,
-				Collections.singleton("read"), Collections.emptySet(), null, Collections.emptySet(),
-				Collections.emptyMap());
-		UsernamePasswordAuthenticationToken userAuth = new UsernamePasswordAuthenticationToken(email, null,
-				AuthorityUtils.createAuthorityList("ROLE_MEMBER"));
-		OAuth2Authentication authentication = new OAuth2Authentication(request, userAuth);
-
-		OAuth2AccessToken accessToken = new DefaultOAuth2AccessToken("placeholder");
-		return converter.enhance(accessToken, authentication).getValue();
+		try {
+			JWTClaimsSet claims = new JWTClaimsSet.Builder().subject(email).claim("user_name", email)
+					.claim("authorities", List.of("ROLE_MEMBER")).issueTime(Date.from(Instant.now()))
+					.expirationTime(Date.from(Instant.now().plusSeconds(3600))).build();
+			SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+			signedJwt.sign(new RSASSASigner((RSAPrivateKey) KEY_PAIR.getPrivate()));
+			return signedJwt.serialize();
+		} catch (Exception e) {
+			throw new IllegalStateException(e);
+		}
 	}
 
 	private HttpEntity<Map<String, Object>> placeOrderRequest(String email, String amount) {
@@ -145,7 +167,7 @@ class OrderServiceApiIT {
 		String orderId = placeOrder("probe@example.com", "42.50");
 
 		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(),
-				"order-placed-probe", "true");
+				"order-placed-probe", true);
 		consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -157,8 +179,9 @@ class OrderServiceApiIT {
 		try (Consumer<String, String> consumer = new KafkaConsumer<>(consumerProps)) {
 			consumer.subscribe(Collections.singletonList(Topics.ORDER_PLACED));
 
-			ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(consumer,
-					Duration.ofSeconds(15).toMillis());
+			// KafkaTestUtils.getRecords now takes a Duration directly (this version's API flipped
+			// from the long-milliseconds overload documented in CLAUDE.md for the previous one).
+			ConsumerRecords<String, String> records = KafkaTestUtils.getRecords(consumer, Duration.ofSeconds(15));
 			ConsumerRecord<String, String> matching = findRecordByKey(records, Topics.ORDER_PLACED, orderId);
 			assertThat(matching.value()).contains(orderId);
 		}

@@ -71,8 +71,7 @@ class InvoiceServiceIT {
 	private InvoiceRepository invoiceRepository;
 
 	private Consumer<String, String> newConsumer(String groupId, String topic) {
-		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId,
-				"true");
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId, true);
 		consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -83,7 +82,7 @@ class InvoiceServiceIT {
 
 	private static List<ConsumerRecord<String, String>> recordsForOrder(Consumer<String, String> consumer,
 			String topic, String orderId, Duration timeout) {
-		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout.toMillis());
+		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout);
 		List<ConsumerRecord<String, String>> matching = new ArrayList<>();
 		for (ConsumerRecord<String, String> record : polled.records(topic)) {
 			if (record.key().equals(orderId)) {

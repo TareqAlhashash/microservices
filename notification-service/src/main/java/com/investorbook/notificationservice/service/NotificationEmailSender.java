@@ -3,8 +3,8 @@ package com.investorbook.notificationservice.service;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 
-import javax.mail.internet.AddressException;
-import javax.mail.internet.MimeMessage;
+import jakarta.mail.internet.AddressException;
+import jakarta.mail.internet.MimeMessage;
 
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;

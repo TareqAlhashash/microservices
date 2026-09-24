@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import javax.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMessage;
 
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -76,8 +76,7 @@ class NotificationServiceIT {
 	private KafkaTemplate<String, Object> kafkaTemplate;
 
 	private Consumer<String, String> newConsumer(String groupId, String topic) {
-		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId,
-				"true");
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(KAFKA.getBootstrapServers(), groupId, true);
 		consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
 		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
@@ -88,7 +87,7 @@ class NotificationServiceIT {
 
 	private static List<ConsumerRecord<String, String>> recordsForOrder(Consumer<String, String> consumer,
 			String topic, String orderId, Duration timeout) {
-		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout.toMillis());
+		ConsumerRecords<String, String> polled = KafkaTestUtils.getRecords(consumer, timeout);
 		List<ConsumerRecord<String, String>> matching = new ArrayList<>();
 		for (ConsumerRecord<String, String> record : polled.records(topic)) {
 			if (record.key().equals(orderId)) {

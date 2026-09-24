@@ -3,7 +3,7 @@
     <!--
     SPRING_ENDPOINT: FindSecBugs' informational marker that a class is web-reachable
     (@RestController / a Feign client interface Spring proxies as one), not a report of a
-    specific defect - see member-service/spotbugs-exclude.xml for the fuller rationale.
+    specific defect - see common/spotbugs-exclude.xml for the fuller rationale.
     -->
     <Match>
         <Bug pattern="SPRING_ENDPOINT" />
@@ -34,5 +34,17 @@
         <Class name="com.investorbook.orderservice.service.OrderEventListener" />
         <Method name="transitionIfExpected" />
         <Bug pattern="CRLF_INJECTION_LOGS" />
+    </Match>
+
+    <!--
+    SPRING_CSRF_PROTECTION_DISABLED: deliberate, not an oversight - see
+    auth-service/spotbugs-exclude.xml for the fuller rationale. This is also a stateless,
+    bearer-token API (SessionCreationPolicy.STATELESS); CSRF exploits rely on a browser
+    automatically attaching a cookie/session to a forged cross-site request, and there is no
+    cookie/session here for one to ride along on.
+    -->
+    <Match>
+        <Class name="com.investorbook.orderservice.security.SecurityConfiguration" />
+        <Bug pattern="SPRING_CSRF_PROTECTION_DISABLED" />
     </Match>
 </FindBugsFilter>

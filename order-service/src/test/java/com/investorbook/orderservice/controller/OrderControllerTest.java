@@ -31,10 +31,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.hateoas.PagedModel;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.mock.web.MockHttpServletRequest;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.provider.authentication.OAuth2AuthenticationDetails;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
 import com.investorbook.orderservice.dao.OrderEventLogRepository;
 import com.investorbook.orderservice.dao.OrderRepository;
@@ -72,11 +72,9 @@ class OrderControllerTest {
 	}
 
 	private static void authenticateAs(String email) {
-		OAuth2AuthenticationDetails details = new OAuth2AuthenticationDetails(new MockHttpServletRequest());
-		details.setDecodedDetails(Collections.singletonMap("user_name", email));
-		UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(email, null,
-				Collections.emptyList());
-		authentication.setDetails(details);
+		Jwt jwt = Jwt.withTokenValue("test-token").header("alg", "none").claim("user_name", email).build();
+		JwtAuthenticationToken authentication = new JwtAuthenticationToken(jwt,
+				AuthorityUtils.createAuthorityList("ROLE_MEMBER"));
 		SecurityContextHolder.getContext().setAuthentication(authentication);
 	}
 

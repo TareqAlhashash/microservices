@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import javax.validation.Valid;
+import jakarta.validation.Valid;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -101,7 +101,7 @@ public class OrderController {
 		Page<OrderResponse> mapped = orders.map(OrderResponse::from);
 		PagedModel.PageMetadata metadata = new PagedModel.PageMetadata(mapped.getSize(), mapped.getNumber(),
 				mapped.getTotalElements(), mapped.getTotalPages());
-		return new PagedModel<>(mapped.getContent(), metadata);
+		return PagedModel.of(mapped.getContent(), metadata);
 	}
 
 	@GetMapping("/orders/{id}/events")
