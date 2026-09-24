@@ -4,25 +4,21 @@ import java.util.Arrays;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
+import org.springframework.web.cors.reactive.CorsWebFilter;
+import org.springframework.web.cors.reactive.UrlBasedCorsConfigurationSource;
 
 /**
- * This is the one service browser clients (the React storefront) call directly, so it's the
- * only service that needs a CORS policy - every other module is only ever called
- * server-to-server or proxied through here. Allowed origins are configurable since the
- * frontend's dev server (Vite) and a real deployment's origin won't be the same.
- *
- * Registered as a plain servlet Filter (not via HttpSecurity.cors()) ordered ahead of Spring
- * Security's own filter chain: SecurityConfiguration's WebSecurity.ignoring() makes the public
- * catalog route (/order-service/products/**) bypass that chain entirely, which would also skip
- * a CORS filter wired through HttpSecurity - a standalone Filter at HIGHEST_PRECEDENCE runs for
- * every request regardless, including ones Spring Security never sees.
+ * This is the one service browser clients (the React storefront) call directly, so it's the only
+ * service that needs a CORS policy. Registered as its own WebFilter, ordered ahead of Spring
+ * Security's reactive filter chain (Ordered.HIGHEST_PRECEDENCE) for the same reason the old
+ * servlet-Filter version was: a permitAll() route still passes through the security filter
+ * chain, but ordering CORS first means its headers are already on the response before anything
+ * later in the chain (including a RateLimitFilter rejection) runs.
  */
 @Configuration
 public class CorsConfig {
@@ -31,7 +27,8 @@ public class CorsConfig {
 	private String allowedOrigins;
 
 	@Bean
-	public FilterRegistrationBean<CorsFilter> corsFilter() {
+	@Order(Ordered.HIGHEST_PRECEDENCE)
+	public CorsWebFilter corsWebFilter() {
 		CorsConfiguration configuration = new CorsConfiguration();
 		List<String> origins = Arrays.asList(allowedOrigins.split(","));
 		configuration.setAllowedOrigins(origins);
@@ -41,9 +38,6 @@ public class CorsConfig {
 
 		UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
 		source.registerCorsConfiguration("/**", configuration);
-
-		FilterRegistrationBean<CorsFilter> registration = new FilterRegistrationBean<>(new CorsFilter(source));
-		registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
-		return registration;
+		return new CorsWebFilter(source);
 	}
 }

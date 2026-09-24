@@ -14,80 +14,89 @@
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>2.2.13.RELEASE</version>
+		<version>4.1.1</version>
 		<relativePath /> <!-- lookup parent from repository -->
 	</parent>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-		<java.version>1.8</java.version>
-		<spring-cloud.version>Hoxton.SR12</spring-cloud.version>
-		<!-- Same overrides the other bumped modules needed for this Boot version on JDK 21:
-		     Boot 2.2's managed Mockito predates JDK 17+ bytecode support, and Boot's BOM
-		     otherwise pins byte-buddy to a version too old for the overridden Mockito. -->
-		<mockito.version>5.11.0</mockito.version>
-		<byte-buddy.version>1.14.13</byte-buddy.version>
+		<java.version>21</java.version>
+		<spring-cloud.version>2025.1.2</spring-cloud.version>
 	</properties>
 
 	<dependencies>
+		<!-- Reactive (WebFlux/Netty) gateway. Everything downstream of this starter - security,
+		     filters, HTTP clients - has to be reactive too, since WebFlux and the servlet API
+		     don't mix in one application. -->
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-netflix-zuul</artifactId>
+			<artifactId>spring-cloud-starter-gateway-server-webflux</artifactId>
 		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.cloud</groupId>
 			<artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
 		</dependency>
+
+		<!-- /actuator/health etc. - unlike Hoxton, this Eureka client no longer pulls actuator
+		     in transitively, so it needs declaring directly. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!-- Modern (non-deprecated) resource-server support: verifies the same RSA-signed JWTs
+		     auth-service issues, just without the legacy spring-security-oauth2 project this
+		     repo's other, not-yet-upgraded services still depend on. -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-oauth2</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
-
+		<!-- Not pulled in transitively by the web starters since Boot 2.3 - needed for @Valid
+		     on LoginRequest (see its Javadoc for why it's a local DTO, not common's AuthRequest). -->
 		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-openfeign</artifactId>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
 		</dependency>
 
+		<!-- No dependency on `common` here (unlike every other service): common pulls in
+		     spring-boot-starter-web and the servlet-stack spring-boot-starter-security, both of
+		     which conflict with a WebFlux app rather than just being unused weight. api-gateway's
+		     real usage of common was two small DTOs, so it owns small local equivalents instead
+		     (dto/AuthResponse, dto/LoginRequest). -->
+
+		<!-- Per-client rate limiting in RateLimitFilter (keyed RateLimiterRegistry, used
+		     programmatically - no Spring AOP integration needed). -->
 		<dependency>
-			<groupId>com.investorbook</groupId>
-			<artifactId>common</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<groupId>io.github.resilience4j</groupId>
+			<artifactId>resilience4j-ratelimiter</artifactId>
+			<version>2.3.0</version>
 		</dependency>
-
-		<!-- Must match the feign-form-spring version spring-cloud-openfeign-core pulls in
-		     transitively (3.8.0 under Hoxton.SR12) - 3.3.0 is missing a method
-		     feign-form-spring's SpringFormEncoder calls, which fails at bean-creation time
-		     with NoSuchMethodError as soon as anything triggers Feign's form encoder. -->
-		<dependency>
-			<groupId>io.github.openfeign.form</groupId>
-			<artifactId>feign-form</artifactId>
-			<version>3.8.0</version>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.cloud</groupId>
-			<artifactId>spring-cloud-starter-sleuth</artifactId>
-		</dependency>
-
-		<!-- loadbalancing the userAuthorizationUri and accessTokenUri -->
-		<dependency>
-			<groupId>org.springframework.retry</groupId>
-			<artifactId>spring-retry</artifactId>
-		</dependency>
-
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
-
+		<!-- TestRestTemplate moved out of spring-boot-test into its own module as of Boot 4 -
+		     org.springframework.boot.resttestclient.TestRestTemplate, not ...test.web.client. -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-resttestclient</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- WebFlux's own test support (WebTestClient) - the reactive equivalent of MockMvc,
+		     used to unit-test the WebFilters without a running server. -->
+		<dependency>
+			<groupId>io.projectreactor</groupId>
+			<artifactId>reactor-test</artifactId>
+			<scope>test</scope>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -113,20 +122,14 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
-				<!-- Same JDK 16+ / jaxb-impl issue as the test JVMs below - this app builds
-				     the same JAXB-based OAuth2 error converter at runtime too, so
-				     `mvn spring-boot:run` needs the flag as much as `mvn test` does. -->
-				<configuration>
-					<jvmArguments>--add-opens java.base/java.lang=ALL-UNNAMED</jvmArguments>
-				</configuration>
 			</plugin>
-			<!-- Same *Test (Surefire) / *IT (Failsafe) split as the other bumped modules. -->
+			<!-- Same *Test (Surefire) / *IT (Failsafe) split as the other bumped modules. No JVM
+			     add-opens flags needed anymore - that was a JAXB-in-a-legacy-OAuth2-library
+			     problem specific to the old spring-security-oauth2 stack, which this module no
+			     longer depends on. -->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-failsafe-plugin</artifactId>
-				<configuration>
-					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
-				</configuration>
 				<executions>
 					<execution>
 						<goals>
@@ -135,16 +138,6 @@
 						</goals>
 					</execution>
 				</executions>
-			</plugin>
-			<!-- Same JAXB/jaxb-impl-on-JDK-16+ issue as auth-service, here on the resource-server
-			     side: ResourceServerConfiguration builds an OAuth2AuthenticationEntryPoint that
-			     eagerly constructs the same unused JAXB error message converter. -->
-			<plugin>
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-surefire-plugin</artifactId>
-				<configuration>
-					<argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
-				</configuration>
 			</plugin>
 			<!-- Static analysis for known insecure code patterns (injection, weak crypto,
 			     path traversal, etc.). Fast and offline, so it runs on every verify. -->
@@ -192,25 +185,5 @@
 			</plugin>
 		</plugins>
 	</build>
-
-	<repositories>
-		<repository>
-			<id>spring-snapshots</id>
-			<name>Spring Snapshots</name>
-			<url>https://repo.spring.io/snapshot</url>
-			<snapshots>
-				<enabled>true</enabled>
-			</snapshots>
-		</repository>
-		<repository>
-			<id>spring-milestones</id>
-			<name>Spring Milestones</name>
-			<url>https://repo.spring.io/milestone</url>
-			<snapshots>
-				<enabled>false</enabled>
-			</snapshots>
-		</repository>
-	</repositories>
-
 
 </project>

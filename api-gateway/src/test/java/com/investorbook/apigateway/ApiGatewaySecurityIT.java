@@ -1,99 +1,165 @@
 package com.investorbook.apigateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.net.URI;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.interfaces.RSAPrivateKey;
+import java.time.Instant;
+import java.util.Base64;
+import java.util.Date;
+import java.util.List;
+
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
-import org.springframework.boot.test.mock.mockito.MockBean;
-import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.boot.resttestclient.TestRestTemplate;
+import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureTestRestTemplate;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.cloud.client.ServiceInstance;
+import org.springframework.cloud.client.discovery.ReactiveDiscoveryClient;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.AuthorityUtils;
-import org.springframework.security.oauth2.common.DefaultOAuth2AccessToken;
-import org.springframework.security.oauth2.common.OAuth2AccessToken;
-import org.springframework.security.oauth2.provider.OAuth2Authentication;
-import org.springframework.security.oauth2.provider.OAuth2Request;
-import org.springframework.security.oauth2.provider.token.store.JwtAccessTokenConverter;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.client.ClientResponse;
+import org.springframework.web.reactive.function.client.WebClient;
 
-import com.investorbook.apigateway.proxy.OauthServiceProxy;
-import com.investorbook.common.dto.AuthResponse;
+import com.investorbook.apigateway.dto.AuthResponse;
+import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.JWSHeader;
+import com.nimbusds.jose.crypto.RSASSASigner;
+import com.nimbusds.jwt.JWTClaimsSet;
+import com.nimbusds.jwt.SignedJWT;
 
-import java.util.Collections;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 /**
- * Proves api-gateway's edge security for real: everything not on the
- * ignored-path allowlist requires a valid JWT (real Spring Security filter
- * chain, not just the annotation), while /login is reachable without one so
- * a client can obtain a token in the first place. OauthServiceProxy (the
- * Feign call to auth-service) is mocked - auth-service isn't running in
- * this test, and it's a genuine external boundary; everything else (the
- * real HTTP round trip, LoginService's Basic-auth header assembly, the
- * security filter chain) is real.
+ * Proves api-gateway's edge security for real: everything not on the permitAll allowlist
+ * requires a valid JWT (the real reactive Spring Security filter chain, not just the DSL config),
+ * while /login is reachable without one so a client can obtain a token in the first place.
+ * auth-service isn't running in this test, so the call LoginService makes to it is mocked at the
+ * two seams that reach outside this process: ReactiveDiscoveryClient (a spy on the real bean, so
+ * every OTHER lookup - notably order-service's, which
+ * anArbitraryRoute_isNotRejectedByGatewaySecurity... below depends on resolving to nothing, same
+ * as production with Eureka disabled - still behaves exactly as it does with no test involved)
+ * and the WebClient it's called through (a stub ExchangeFunction - StubWebClientConfig).
+ * Everything else (the real HTTP round trip, the security filter chain) is real.
+ *
+ * Mints its own RSA keypair rather than reusing a fixed test secret: the modern
+ * NimbusReactiveJwtDecoder only verifies asymmetric (RSA) signatures, unlike the old
+ * spring-security-oauth2 resource server this replaced, which could be pointed at a plain HMAC
+ * secret for a quick test override.
  */
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = { "eureka.client.enabled=false",
-		"security.oauth2.resource.jwt.key-value=test-signing-secret-please-ignore" })
+@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, properties = "eureka.client.enabled=false")
+@AutoConfigureTestRestTemplate
 class ApiGatewaySecurityIT {
 
-	private static final String SIGNING_KEY = "test-signing-secret-please-ignore";
+	private static final KeyPair KEY_PAIR = generateRsaKeyPair();
 
 	@Autowired
 	private TestRestTemplate restTemplate;
 
-	@MockBean
-	private OauthServiceProxy oauthServiceProxy;
+	// A spy, not a wholesale mock/replacement bean: the real bean here is already @Primary
+	// (Spring Cloud's reactiveCompositeDiscoveryClient), so a second bean of this type marked
+	// @Primary to take its place is ambiguous rather than an override. A spy wraps that same
+	// bean in place instead, real behaviour untouched except for the one lookup stubbed below.
+	@MockitoSpyBean
+	private ReactiveDiscoveryClient discoveryClient;
 
-	private static String tokenFor(String username) {
-		JwtAccessTokenConverter converter = new JwtAccessTokenConverter();
-		converter.setSigningKey(SIGNING_KEY);
+	@BeforeEach
+	void stubAuthServiceDiscovery() {
+		ServiceInstance authServiceInstance = mock(ServiceInstance.class);
+		when(authServiceInstance.getUri()).thenReturn(URI.create("http://auth-service.test"));
+		doReturn(Flux.just(authServiceInstance)).when(discoveryClient).getInstances(eq("auth-service"));
+	}
 
-		OAuth2Request request = new OAuth2Request(Collections.emptyMap(), "html5", Collections.emptyList(), true,
-				Collections.singleton("read"), Collections.emptySet(), null, Collections.emptySet(),
-				Collections.emptyMap());
-		UsernamePasswordAuthenticationToken userAuth = new UsernamePasswordAuthenticationToken(username, null,
-				AuthorityUtils.createAuthorityList("ROLE_MEMBER"));
-		OAuth2Authentication authentication = new OAuth2Authentication(request, userAuth);
+	@DynamicPropertySource
+	static void jwtPublicKey(DynamicPropertyRegistry registry) {
+		registry.add("investorbook.security.jwt.public.key", ApiGatewaySecurityIT::publicKeyPem);
+	}
 
-		OAuth2AccessToken accessToken = new DefaultOAuth2AccessToken("placeholder");
-		return converter.enhance(accessToken, authentication).getValue();
+	// The stub ReactiveDiscoveryClient above resolves "auth-service" to a URI nothing is actually
+	// listening on - this WebClient never opens a real connection, so that's fine; it always
+	// answers with the same canned token response regardless of the request.
+	@TestConfiguration
+	static class StubWebClientConfig {
+
+		@Bean
+		@Primary
+		WebClient stubInternalWebClient() {
+			return WebClient.builder().exchangeFunction(request -> {
+				ClientResponse response = ClientResponse.create(HttpStatus.OK)
+						.header("Content-Type", "application/json").body("{\"access_token\":\"access\"}").build();
+				return Mono.just(response);
+			}).build();
+		}
+	}
+
+	private static KeyPair generateRsaKeyPair() {
+		try {
+			KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
+			generator.initialize(2048);
+			return generator.generateKeyPair();
+		} catch (Exception e) {
+			throw new IllegalStateException(e);
+		}
+	}
+
+	private static String publicKeyPem() {
+		String base64 = Base64.getEncoder().encodeToString(KEY_PAIR.getPublic().getEncoded());
+		return "-----BEGIN PUBLIC KEY-----\n" + base64 + "\n-----END PUBLIC KEY-----";
+	}
+
+	private static String tokenFor(String username) throws Exception {
+		JWTClaimsSet claims = new JWTClaimsSet.Builder().subject(username).claim("user_name", username)
+				.claim("authorities", List.of("ROLE_MEMBER")).issueTime(Date.from(Instant.now()))
+				.expirationTime(Date.from(Instant.now().plusSeconds(3600))).build();
+		SignedJWT signedJwt = new SignedJWT(new JWSHeader(JWSAlgorithm.RS256), claims);
+		signedJwt.sign(new RSASSASigner((RSAPrivateKey) KEY_PAIR.getPrivate()));
+		return signedJwt.serialize();
 	}
 
 	@Test
 	void anArbitraryRoute_isRejectedWithoutAToken() {
-		ResponseEntity<String> response = restTemplate.getForEntity("/member-service/member", String.class);
+		ResponseEntity<String> response = restTemplate.getForEntity("/order-service/orders", String.class);
 
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 
 	@Test
-	void anArbitraryRoute_isNotRejectedByGatewaySecurity_whenBearingAValidToken() {
+	void anArbitraryRoute_isNotRejectedByGatewaySecurity_whenBearingAValidToken() throws Exception {
 		HttpHeaders headers = new HttpHeaders();
 		headers.setBearerAuth(tokenFor("jane@example.com"));
 
-		ResponseEntity<String> response = restTemplate.exchange("/member-service/member", HttpMethod.GET,
+		ResponseEntity<String> response = restTemplate.exchange("/order-service/orders", HttpMethod.GET,
 				new HttpEntity<>(headers), String.class);
 
-		// Eureka is disabled in this test, so Zuul can't resolve member-service and
-		// the request fails downstream of the gateway's own security filter - the
-		// point being proven here is that it is NOT rejected at 401 by this service.
+		// Eureka is disabled in this test, so Gateway can't resolve order-service and the
+		// request fails downstream of the gateway's own security filter chain - the point being
+		// proven here is that it is NOT rejected at 401 by this service.
 		assertThat(response.getStatusCode()).isNotEqualTo(HttpStatus.UNAUTHORIZED);
 	}
 
 	@Test
 	void loginPath_bypassesGatewaySecurity_evenWithoutAToken() {
-		when(oauthServiceProxy.login(any(), any()))
-				.thenReturn(new AuthResponse("access", "refresh", "bearer", "3600", "read", "jti"));
-
 		HttpHeaders headers = new HttpHeaders();
 		headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 		MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
@@ -104,15 +170,14 @@ class ApiGatewaySecurityIT {
 				AuthResponse.class);
 
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-		assertThat(response.getBody().getAccessToken()).isEqualTo("access");
+		assertThat(response.getBody().accessToken()).isEqualTo("access");
 	}
 
 	/**
-	 * AuthRequest's @NotNull/@Size constraints only bite now that login() takes
-	 * @Valid - proves both that validation actually runs and that the shared
-	 * CustomizedResponseEntityExceptionHandler (imported into
-	 * ApiGatewayApplication) produces its usual error shape for it, same as any
-	 * other validation failure in the system.
+	 * LoginRequest's jakarta.validation constraints only bite because /login binds it with
+	 * @Valid @ModelAttribute - proves both that validation actually runs and that
+	 * WebFluxExceptionHandler produces the usual {timestamp, message, details} error shape for
+	 * it, same as any other validation failure in the system.
 	 */
 	@Test
 	void login_rejectsAMissingPassword_with400() {
@@ -135,16 +200,4 @@ class ApiGatewaySecurityIT {
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
 		assertThat(response.getBody()).contains("\"status\":\"UP\"");
 	}
-
-	/*
-	 * Deliberately not testing /uaa/oauth/token or /member-service/signup the
-	 * same way as /login: both are Zuul-proxied routes with no real controller
-	 * in this app, and with Eureka disabled (as it is in every test here) Zuul
-	 * can't resolve them, which forwards internally to an ERROR dispatch that
-	 * re-enters the secured "any request, authenticated" chain and comes back
-	 * 401 for reasons unrelated to whether the original path is on the
-	 * ignore-list. That's a real, worth-knowing quirk of testing Zuul routes
-	 * without a running Eureka, not a gap in what /login already proves about
-	 * the ignore-list mechanism itself.
-	 */
 }
