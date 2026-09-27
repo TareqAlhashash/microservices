@@ -226,26 +226,14 @@ glossed over.
    }
    return reject(clientKey, exchange.getResponse());
    ```
-   The interesting part wasn't the limiter itself, it was where to hook it in. A first cut wired
-   this in as a Gateway `GlobalFilter` (matching the request-logging filter's own pattern) and
-   passed its own unit test, but a real HTTP request to `/actuator/health` sailed straight
-   through: a `GlobalFilter` only runs for requests actually proxied to a downstream route, never
-   for this gateway's own locally-handled endpoints (`/login`, `/actuator/**`, `/dashboard/**`) -
-   the *identical* gap `CorsConfig` already documents for CORS. Fixed the same way CORS was: a
-   plain `WebFilter` registered ahead of Spring Security's own chain, so it applies uniformly even
-   to routes a `permitAll()` rule lets bypass that chain entirely. Proven live, not just by test: a
-   20-request burst against a running instance got 200s
-   until the limit, then 429s with a `Retry-After` header and the same
+   Registered as a plain `WebFilter` ahead of Spring Security's chain (not a Gateway
+   `GlobalFilter`, which never runs for this gateway's own locally-handled endpoints like
+   `/login`/`/actuator/**`), so it applies uniformly even to routes a `permitAll()` rule bypasses
+   security for entirely. A rejected request gets a 429 with a `Retry-After` header and the same
    `{timestamp, message, details}` error shape as everywhere else in this system (see "Error
-   Hygiene" below); `RateLimitFilterIT` proves the same over a real HTTP round trip at a lower,
-   deterministic limit (and has to disable `TestRestTemplate`'s own automatic retry-on-429, since
-   its modern Apache HttpClient5 client honors that same `Retry-After` header and would otherwise
-   silently retry into the passing response the test is trying to catch), and `RateLimitFilterTest`
-   covers the limiter logic itself (allow, reject, per-client isolation) without spinning up
-   Spring. Honestly: it's in-memory and keyed by remote address, so it doesn't share state across
-   a horizontally-scaled deployment (each replica enforces its own limit) and never evicts a
-   client's limiter once created - fine for a demo, not for real internet traffic. See the class's
-   own Javadoc for the full list.
+   Hygiene" below). In-memory and keyed by remote address, so it doesn't share state across a
+   horizontally-scaled deployment - fine for a demo, not for real internet traffic. See the
+   class's own Javadoc for the full list.
 
 4. **Input Validation** - rejects malformed input at the boundary. Bean Validation
    (`jakarta.validation`/`javax.validation`) annotations on every request DTO, enforced by
