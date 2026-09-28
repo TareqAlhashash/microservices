@@ -17,11 +17,15 @@ commands; [`docs/adr/`](docs/adr/) for the decisions behind it.
 ```mermaid
 graph LR
     Member([Member])
+    Operator([Operator])
     System[[InvestorBook]]
     Email[[Email provider]]
+    Prometheus[[Prometheus]]
 
     Member -->|logs in, places orders - HTTPS/JSON| System
     System -.->|order-complete emails - mocked in this demo| Email
+    Operator -->|checks service health and metrics - HTTP| Prometheus
+    Prometheus ==>|scrapes /actuator/prometheus every 15s| System
 ```
 
 ### Containers, core services
@@ -33,12 +37,18 @@ graph TB
     Auth["auth-service :9100<br/>OAuth2/JWT authorization server"]
     Eureka["eureka-server :8761<br/>service discovery"]
     DB[(PostgreSQL)]
+    Prom["Prometheus :9090<br/>metrics, Docker"]
+    Operator([Operator])
 
     Member -->|HTTPS| GW
     GW -->|POST /login| Auth
     Auth --> DB
     GW -.->|register/discover| Eureka
     Auth -.->|register/discover| Eureka
+    Operator -->|HTTP| Prom
+    Prom ==>|scrape /actuator/prometheus| GW
+    Prom ==>|scrape /uaa/actuator/prometheus| Auth
+    Prom ==>|scrape /actuator/prometheus| Eureka
 ```
 
 Eureka (Netflix OSS) is in maintenance mode; kept because it still works correctly and a new
@@ -47,6 +57,12 @@ service only needs `eureka.client.service-url.default-zone` pointed at it to reg
 `CLAUDE.md`'s "api-gateway" section for the reactive Spring Cloud Gateway architecture. A new
 microservices system built today would still likely pair Spring Cloud Gateway with
 Kubernetes-native discovery (DNS-based Service resolution) rather than Eureka.
+
+Prometheus (started by the same `docker compose up -d`) scrapes every service's
+`/actuator/prometheus` endpoint, the seven services in both diagrams, on a fixed list of static
+targets rather than through Eureka. Open `http://localhost:9090/targets` to see which services are
+up. See [ADR-011](docs/adr/011-prometheus-metrics.md) for why it is metrics only, with no Grafana,
+tracing or alerting yet.
 
 ### Containers, event-driven purchase flow
 
@@ -63,6 +79,12 @@ graph LR
     NotifSvc["notification-service :8500"]
     Kafka{{"Kafka :9092<br/>Docker, single-node KRaft"}}
     DB[(PostgreSQL<br/>own tables per service)]
+    Prom["Prometheus :9090<br/>metrics, Docker"]
+
+    Prom ==>|scrape /actuator/prometheus| OrderSvc
+    Prom ==>|scrape /actuator/prometheus| PaymentSvc
+    Prom ==>|scrape /actuator/prometheus| InvoiceSvc
+    Prom ==>|scrape /actuator/prometheus| NotifSvc
 
     OrderSvc -->|order.placed| Kafka
     Kafka -->|order.placed| PaymentSvc
@@ -155,6 +177,7 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 | `notification-service` | 8500 | Emails (mocked) the customer, closes the saga |
 | `common` | n/a | Shared DTOs, events, error handling (not a service) |
 | Kafka | 9092 | Event bus for the purchase-flow saga (`docker compose up -d`, not a service) |
+| Prometheus | 9090 | Scrapes every service's `/actuator/prometheus` (`docker compose up -d`, not a service) |
 | `frontend` | 5173 | React storefront (Vite dev server), calls `api-gateway` directly over CORS - not a Maven module |
 
 ## Accounts
@@ -171,6 +194,9 @@ create additional accounts - a known, named gap, not a hidden one.
   end-to-end tests. `mvn verify` is clean, including SpotBugs/FindSecBugs, on all seven.
 - **Not done**: OWASP Dependency-Check has never completed a run here (no NVD API key, so the first
   sync is too slow); no CI.
+- **Metrics, not full observability**: Prometheus scrapes every service, but there is no Grafana
+  dashboard, no distributed tracing, no centralized log search, and no alerting yet. See
+  [ADR-011](docs/adr/011-prometheus-metrics.md).
 - **Demo-scale on purpose**: one shared Postgres instance (see [ADR-004](docs/adr/004-per-service-data-ownership.md)),
   one checked-in demo RSA keypair (env-overridable), mocked payment and email. See the ADRs for
   what a production version of each would do differently.
@@ -372,13 +398,23 @@ glossed over.
 
 ```bash
 cd common && mvn clean install                 # build the shared library first
-docker compose up -d                           # Kafka, for the purchase-flow services
+docker compose up -d                           # Kafka (purchase-flow services) and Prometheus
 # start eureka-server, auth-service, api-gateway, then the four purchase-flow services,
 # each via:
 cd <service-dir> && mvn spring-boot:run
 
 cd frontend && npm install && npm run dev     # storefront UI, once api-gateway is up
 ```
+
+Once everything is up:
+
+| What | URL |
+|---|---|
+| Prometheus targets (start here, all seven should be `UP`) | http://localhost:9090/targets |
+| Prometheus query UI | http://localhost:9090/graph |
+| Eureka dashboard (registered services) | http://localhost:8761 |
+| API gateway (the only externally-called service) | http://localhost:8765 |
+| Storefront | http://localhost:5173 |
 
 Full startup order, required Postgres setup, and per-module test commands are in
 [`CLAUDE.md`](CLAUDE.md#commands).

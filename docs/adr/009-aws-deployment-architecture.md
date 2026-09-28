@@ -70,7 +70,9 @@ Secrets Manager holds the JWT keypair and DB credentials (replacing the `${ENV_V
 placeholders described in `CLAUDE.md`'s "Config & secrets" section).
 CloudWatch collects the structured logs and Actuator metrics every service already emits (see
 `CLAUDE.md`'s "Observability" section), nothing new has to be added to the application for that
-to work, only where the logs are shipped changes.
+to work, only where the logs are shipped changes. Locally the same Actuator metrics are scraped by
+Prometheus (see [ADR-011](011-prometheus-metrics.md)); on AWS that is either this CloudWatch path
+or an agent feeding Amazon Managed Service for Prometheus, with no change to the services.
 
 This is a lift of the existing seven services onto managed AWS equivalents of their current local
 infrastructure, not a redesign, no service is split, merged, or given new responsibilities to fit

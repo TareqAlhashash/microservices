@@ -279,7 +279,8 @@ Start order matters because services register with and discover each other throu
    first startup (`DemoMemberSeeder` - there's no signup flow, see "Accounts" in `README.md`)
 4. `api-gateway` (port **8765**) — Spring Cloud Gateway edge router, the only service meant to be
    called externally
-5. Kafka reachable at `localhost:9092` (`docker compose up -d` at the repo root) — required by the
+5. Kafka reachable at `localhost:9092` (`docker compose up -d` at the repo root, which also starts
+   Prometheus on `http://localhost:9090`, see "Observability" below), required by the
    purchase-flow services: `order-service` (port **8200**), `payment-service` (port **8300**),
    `invoice-service` (port **8400**), `notification-service` (port **8500**); see "Event-driven
    purchase flow" below. Order doesn't matter between these four beyond Kafka/Postgres being up
@@ -378,10 +379,10 @@ for what a real deployment would use instead.
 `spring-boot-starter-actuator` is on every service's classpath (transitively, via
 `spring-cloud-starter-netflix-eureka-client`, which needs it for Eureka's own health-check
 integration — nothing had to declare it explicitly). `management.endpoints.web.exposure.include=
-health,info,metrics` is now set explicitly in every service (previously whatever Boot's own
-default was), and each service's `SecurityConfiguration` adds `/actuator/**` to its
-`WebSecurity.ignoring()` list — deliberately unauthenticated, since a health-check probe or
-metrics scraper doesn't carry this app's own bearer token. In a real deployment these would sit
+health,info,metrics,prometheus` is now set explicitly in every service (previously whatever
+Boot's own default was), and each service's `SecurityConfiguration` permits `/actuator/**`,
+deliberately unauthenticated, since a health-check probe or metrics scraper doesn't carry this
+app's own bearer token. In a real deployment these would sit
 on a separate management port/network instead of the public one (`management.server.port`); not
 done here to keep the demo's moving parts down. Every touched service's IT suite has a plain
 `actuatorHealth_isReachableWithoutAToken` test proving the carve-out actually works, not just
@@ -393,8 +394,17 @@ starts Prometheus on `http://localhost:9090`, configured by `monitoring/promethe
 static scrape job per service (Status > Targets shows which are up). Prometheus runs in Docker
 while the services run on the host, so the targets use `host.docker.internal`. `auth-service` is
 the one job with a different `metrics_path` (`/uaa/actuator/prometheus`), for the same context-path
-reason as its health check in `DashboardService`. Nothing else in the repo changed: no custom
-metrics, no Grafana yet.
+reason as its health check in `DashboardService`. No custom metrics, no Grafana, tracing or
+alerting yet; see [ADR-011](docs/adr/011-prometheus-metrics.md).
+
+`payment-service`, `invoice-service` and `notification-service` have no REST API and used to have
+no `SecurityConfiguration` at all. Spring Security still arrives through `common`, and Boot's
+default only leaves `/actuator/health` and `/actuator/info` open, so `/actuator/prometheus`
+answered 401 (found by scraping them for real, not by the tests). Each now has a minimal
+`security/SecurityConfiguration` that permits `/actuator/**` and denies every other path. It is
+verified by hand against a running instance, not by an automated test: those services' ITs have no
+web layer, and adding one means a Testcontainers Postgres and Kafka plus a `TestRestTemplate` in
+each.
 
 ### Security scanning: SpotBugs + FindSecBugs + OWASP Dependency-Check on every module
 
@@ -494,9 +504,10 @@ all seven migrations, not just one:
 
 ### Naming and package quirks to know about
 
-- Three independent `com.investorbook.<x>.security.SecurityConfiguration` classes exist
-  (`auth-service`, `api-gateway`, `order-service`) — same intent, not shared code, don't assume
-  editing one affects another. `order-service`'s JWT verification lives directly in its
+- Six independent `com.investorbook.<x>.security.SecurityConfiguration` classes exist
+  (`auth-service`, `api-gateway`, `order-service`, plus the minimal actuator-only ones in
+  `payment-service`, `invoice-service` and `notification-service`), same intent, not shared code,
+  don't assume editing one affects another. `order-service`'s JWT verification lives directly in its
   `SecurityConfiguration` now (a `JwtAuthenticationConverter` bean, `setAuthoritiesClaimName`/
   `setAuthorityPrefix("")` since auth-service's JWT already embeds `ROLE_`-prefixed authorities
   under a literal `authorities` claim) - the separate `JwtConvertor` class this used to delegate
