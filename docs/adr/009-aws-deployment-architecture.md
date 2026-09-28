@@ -68,11 +68,15 @@ behind an Application Load Balancer, itself behind CloudFront with an attached A
 RDS PostgreSQL (Multi-AZ, one instance) and Amazon MSK sit in private subnets in both AZs.
 Secrets Manager holds the JWT keypair and DB credentials (replacing the `${ENV_VAR:default}`
 placeholders described in `CLAUDE.md`'s "Config & secrets" section).
-CloudWatch collects the structured logs and Actuator metrics every service already emits (see
-`CLAUDE.md`'s "Observability" section), nothing new has to be added to the application for that
-to work, only where the logs are shipped changes. Locally the same Actuator metrics are scraped by
-Prometheus (see [ADR-011](011-prometheus-metrics.md)); on AWS that is either this CloudWatch path
-or an agent feeding Amazon Managed Service for Prometheus, with no change to the services.
+Observability maps one to one from the local stack ([ADR-011](011-prometheus-metrics.md) and
+[ADR-012](012-grafana-lgtm-tracing.md)). Every Fargate task runs an AWS Distro for OpenTelemetry
+(ADOT) collector as a sidecar. Containers in a Fargate task share a network namespace, so the
+services keep their `http://localhost:4318` OTLP endpoint and none of their configuration
+changes. The sidecar sends traces to AWS X-Ray and logs to CloudWatch Logs, and scrapes the
+task's `/actuator/prometheus` and remote-writes the metrics to Amazon Managed Service for
+Prometheus. Amazon Managed Grafana is the one UI over all three, replacing the Grafana LGTM
+container. The architecture diagram shows this as the observability box. This is a design and
+has not been run on AWS.
 
 This is a lift of the existing seven services onto managed AWS equivalents of their current local
 infrastructure, not a redesign, no service is split, merged, or given new responsibilities to fit

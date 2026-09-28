@@ -21,11 +21,15 @@ graph LR
     System[[InvestorBook]]
     Email[[Email provider]]
     Prometheus[[Prometheus]]
+    Grafana[[Grafana LGTM]]
 
     Member -->|logs in, places orders - HTTPS/JSON| System
     System -.->|order-complete emails - mocked in this demo| Email
     Operator -->|checks service health and metrics - HTTP| Prometheus
+    Operator -->|follows an order's trace - HTTP| Grafana
     Prometheus ==>|scrapes /actuator/prometheus every 15s| System
+    System -->|sends traces and logs - OTLP/HTTP| Grafana
+    Grafana -->|queries metrics| Prometheus
 ```
 
 ### Containers, core services
@@ -38,6 +42,7 @@ graph TB
     Eureka["eureka-server :8761<br/>service discovery"]
     DB[(PostgreSQL)]
     Prom["Prometheus :9090<br/>metrics, Docker"]
+    LGTM["Grafana LGTM :3000<br/>Grafana, Tempo traces, Loki logs, Docker<br/>OTLP receiver :4318"]
     Operator([Operator])
 
     Member -->|HTTPS| GW
@@ -45,6 +50,10 @@ graph TB
     Auth --> DB
     GW -.->|register/discover| Eureka
     Auth -.->|register/discover| Eureka
+    GW -->|OTLP traces and logs| LGTM
+    Auth -->|OTLP traces and logs| LGTM
+    LGTM -->|queries metrics| Prom
+    Operator -->|HTTP| LGTM
     Operator -->|HTTP| Prom
     Prom ==>|scrape /actuator/prometheus| GW
     Prom ==>|scrape /uaa/actuator/prometheus| Auth
@@ -61,8 +70,14 @@ Kubernetes-native discovery (DNS-based Service resolution) rather than Eureka.
 Prometheus (started by the same `docker compose up -d`) scrapes every service's
 `/actuator/prometheus` endpoint, the seven services in both diagrams, on a fixed list of static
 targets rather than through Eureka. Open `http://localhost:9090/targets` to see which services are
-up. See [ADR-011](docs/adr/011-prometheus-metrics.md) for why it is metrics only, with no Grafana,
-tracing or alerting yet.
+up. See [ADR-011](docs/adr/011-prometheus-metrics.md).
+
+The Grafana LGTM container in the same compose file receives OpenTelemetry traces and logs from
+every service except `eureka-server`. One order is a single trace across the gateway, the four saga
+services and every Kafka hop, browsable at `http://localhost:3000` (Explore, then the Tempo
+datasource), and each log line carries the trace id, so a trace links to the log lines of every
+service that took part (Explore, then the Loki datasource). The same Grafana has the standalone
+Prometheus as a datasource. See [ADR-012](docs/adr/012-grafana-lgtm-tracing.md).
 
 ### Containers, event-driven purchase flow
 
@@ -80,7 +95,9 @@ graph LR
     Kafka{{"Kafka :9092<br/>Docker, single-node KRaft"}}
     DB[(PostgreSQL<br/>own tables per service)]
     Prom["Prometheus :9090<br/>metrics, Docker"]
+    LGTM["Grafana LGTM :3000<br/>traces and logs, Docker"]
 
+    OrderSvc & PaymentSvc & InvoiceSvc & NotifSvc -->|OTLP traces and logs| LGTM
     Prom ==>|scrape /actuator/prometheus| OrderSvc
     Prom ==>|scrape /actuator/prometheus| PaymentSvc
     Prom ==>|scrape /actuator/prometheus| InvoiceSvc
@@ -119,12 +136,66 @@ notification fails       NotificationFailed --> invoice-service voids --InvoiceV
 (the order, plus the two events that mean a refund is due), `invoice-service` two, and
 `notification-service` one.
 
+### Monitoring architecture
+
+Three signals, three routes, one Grafana. Metrics are pulled by Prometheus; traces and logs are
+pushed by each service over OpenTelemetry (OTLP) to the Grafana LGTM container, which stores them
+in Tempo and Loki. Grafana sits on top of all three:
+
+```mermaid
+graph LR
+    Operator([Operator])
+    App["Every service except eureka-server<br/>Spring Boot + Micrometer + OpenTelemetry"]
+    Prom["Prometheus :9090<br/>metrics, Docker"]
+
+    subgraph LGTM["Grafana LGTM container, Docker"]
+        Collector["OpenTelemetry collector<br/>OTLP :4318"]
+        Tempo[("Tempo<br/>traces")]
+        Loki[("Loki<br/>logs")]
+        Grafana["Grafana :3000"]
+    end
+
+    Prom ==>|scrapes /actuator/prometheus every 15s| App
+    App -->|OTLP traces and logs| Collector
+    Collector --> Tempo
+    Collector --> Loki
+    Grafana -->|queries| Tempo
+    Grafana -->|queries| Loki
+    Grafana -->|queries| Prom
+    Operator -->|traces, logs, metrics| Grafana
+    Operator -->|targets and raw queries| Prom
+```
+
+What ties the signals together: the gateway starts a trace for every request, the trace id travels
+to each service in the HTTP headers and across Kafka in the record headers, and every log line
+carries that `trace_id`. So from one order's trace, Grafana can jump to the log lines of every
+service that took part. Health checks, Prometheus scrapes and Eureka traffic are filtered out of
+tracing so they don't bury real requests. See [ADR-011](docs/adr/011-prometheus-metrics.md) for
+metrics and [ADR-012](docs/adr/012-grafana-lgtm-tracing.md) for traces and logs.
+
+Each piece has a managed AWS counterpart in the target deployment below, and the services'
+own configuration does not change:
+
+| Concern | Local | Target AWS |
+|---|---|---|
+| Collector | OpenTelemetry collector inside the LGTM container | ADOT (AWS Distro for OpenTelemetry) collector as a sidecar in every Fargate task |
+| Metrics | Prometheus scraping `/actuator/prometheus` | The ADOT sidecar scrapes the task and remote-writes to Amazon Managed Service for Prometheus |
+| Traces | Tempo | AWS X-Ray |
+| Logs | Loki | CloudWatch Logs |
+| Dashboards and search | Grafana in the LGTM container | Amazon Managed Grafana over all three |
+
+Not covered yet: dashboards, alerting, and the Kafka broker itself (only the services' own
+producer and consumer spans and logs are). The AWS column is a design, not something that has been
+run on AWS.
+
 ### Target AWS deployment
 
 Nothing here runs on AWS today; everything runs locally. This is what a production rollout would
 map onto, across two Availability Zones, one AWS managed service per piece of local
 infrastructure this repo already depends on, not a redesign (the diagram still shows S3, which
-this system no longer uses - see ADR-009's note):
+this system no longer uses - see ADR-009's note). The monitoring stack maps the same way: an ADOT
+collector sidecar in each Fargate task feeding X-Ray, CloudWatch Logs and Amazon Managed
+Prometheus, with Amazon Managed Grafana on top (see "Monitoring architecture" above):
 
 ![Target AWS production architecture](docs/architecture-aws.svg)
 
@@ -178,6 +249,7 @@ doesn't claim (no auto-scaling policy, no multi-region failover, no CI/CD pipeli
 | `common` | n/a | Shared DTOs, events, error handling (not a service) |
 | Kafka | 9092 | Event bus for the purchase-flow saga (`docker compose up -d`, not a service) |
 | Prometheus | 9090 | Scrapes every service's `/actuator/prometheus` (`docker compose up -d`, not a service) |
+| Grafana LGTM | 3000 | Grafana UI plus Tempo (traces) and Loki (logs), OTLP receiver on 4318 (`docker compose up -d`, not a service) |
 | `frontend` | 5173 | React storefront (Vite dev server), calls `api-gateway` directly over CORS - not a Maven module |
 
 ## Accounts
@@ -194,9 +266,11 @@ create additional accounts - a known, named gap, not a hidden one.
   end-to-end tests. `mvn verify` is clean, including SpotBugs/FindSecBugs, on all seven.
 - **Not done**: OWASP Dependency-Check has never completed a run here (no NVD API key, so the first
   sync is too slow); no CI.
-- **Metrics, not full observability**: Prometheus scrapes every service, but there is no Grafana
-  dashboard, no distributed tracing, no centralized log search, and no alerting yet. See
-  [ADR-011](docs/adr/011-prometheus-metrics.md).
+- **Metrics, traces and logs, but not a finished monitoring setup**: Prometheus scrapes every
+  service, Grafana shows one trace per order across the whole saga, and every service's logs are in
+  Loki, linked to the trace. There are no Grafana dashboards, no alerting, and the Kafka broker
+  itself is not monitored. See [ADR-011](docs/adr/011-prometheus-metrics.md) and
+  [ADR-012](docs/adr/012-grafana-lgtm-tracing.md).
 - **Demo-scale on purpose**: one shared Postgres instance (see [ADR-004](docs/adr/004-per-service-data-ownership.md)),
   one checked-in demo RSA keypair (env-overridable), mocked payment and email. See the ADRs for
   what a production version of each would do differently.
@@ -398,7 +472,7 @@ glossed over.
 
 ```bash
 cd common && mvn clean install                 # build the shared library first
-docker compose up -d                           # Kafka (purchase-flow services) and Prometheus
+docker compose up -d                           # Kafka (purchase-flow services), Prometheus, Grafana LGTM
 # start eureka-server, auth-service, api-gateway, then the four purchase-flow services,
 # each via:
 cd <service-dir> && mvn spring-boot:run
@@ -412,6 +486,7 @@ Once everything is up:
 |---|---|
 | Prometheus targets (start here, all seven should be `UP`) | http://localhost:9090/targets |
 | Prometheus query UI | http://localhost:9090/graph |
+| Grafana (traces and metrics, login `admin` / `admin`) | http://localhost:3000 |
 | Eureka dashboard (registered services) | http://localhost:8761 |
 | API gateway (the only externally-called service) | http://localhost:8765 |
 | Storefront | http://localhost:5173 |

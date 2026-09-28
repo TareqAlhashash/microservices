@@ -15,4 +15,5 @@ downsides). These are demo-scale decisions, not claims of a production-perfect s
 | [008](008-saga-compensation.md) | A real compensating action on payment failure |
 | [009](009-aws-deployment-architecture.md) | Target AWS deployment: Fargate, Multi-AZ, MSK, CloudFront+WAF |
 | [010](010-compensation-after-payment.md) | Compensating actions for every saga step after payment: void the invoice, refund, cancel |
-| [011](011-prometheus-metrics.md) | Prometheus scraping Micrometer metrics from every service, metrics only for now |
+| [011](011-prometheus-metrics.md) | Prometheus scraping Micrometer metrics from every service |
+| [012](012-grafana-lgtm-tracing.md) | Grafana LGTM for distributed tracing and logs across the gateway, services and Kafka |

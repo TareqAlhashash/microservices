@@ -50,10 +50,9 @@ monitored with.
 - **Good**: the hand-built dashboard and the order audit trail are unchanged. They serve a
   different purpose (a demo-facing view and a business history), so this adds to them rather than
   replacing them.
-- **Bad, honestly**: metrics only. There is no Grafana dashboard, no alerting (Prometheus records
-  `up`, but nothing pages anyone), no distributed tracing and no centralized log search, so
-  following one order across services is still done by reading the audit trail or each service's
-  log.
+- **Bad, honestly**: metrics only. There is no Grafana dashboard and no alerting (Prometheus
+  records `up`, but nothing pages anyone). Tracing was added afterwards, see
+  [ADR-012](012-grafana-lgtm-tracing.md), along with logs in Loki.
 - **Bad, honestly**: the endpoint is unauthenticated, for the same reason `/actuator/health` is: a
   scraper carries no bearer token. A real deployment would put it on a separate management
   port or network.
@@ -62,6 +61,6 @@ monitored with.
 - **Bad, honestly**: static targets mean a new service must be added to `prometheus.yml` by hand,
   and a second instance of a service would not be scraped.
 - **Production mapping**: nothing in the services changes. On AWS (see
-  [ADR-009](009-aws-deployment-architecture.md)) the same endpoint can be scraped by an agent into
-  Amazon Managed Service for Prometheus, or the metrics can go to CloudWatch as that ADR
-  describes. The AWS diagram was not changed for this.
+  [ADR-009](009-aws-deployment-architecture.md)) the ADOT collector sidecar in each task scrapes
+  the same endpoint and remote-writes it to Amazon Managed Service for Prometheus, shown in the
+  AWS diagram.

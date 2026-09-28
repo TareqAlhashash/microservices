@@ -331,6 +331,12 @@ Start order matters because services register with and discover each other throu
     body throughout. Explicitly rethrows `AccessDeniedException`/`AuthenticationException`
     rather than handling them — see "Shared error handling" for the real 403-became-500 bug that
     omission caused. Every remaining service `@Import`s this.
+  - `observation/InfrastructureObservationConfiguration`: an `ObservationPredicate` bean that
+    keeps `/actuator` requests and Eureka client calls out of traces and HTTP metrics; imported by
+    the five servlet services (see "Observability").
+  - `observation/OpenTelemetryLogAppenderConfiguration`: hands the OpenTelemetry SDK to the
+    Logback appender so log lines reach Loki; imported by the same five services (see
+    "Observability").
 
 ### Security model (the architectural throughline)
 
@@ -394,8 +400,42 @@ starts Prometheus on `http://localhost:9090`, configured by `monitoring/promethe
 static scrape job per service (Status > Targets shows which are up). Prometheus runs in Docker
 while the services run on the host, so the targets use `host.docker.internal`. `auth-service` is
 the one job with a different `metrics_path` (`/uaa/actuator/prometheus`), for the same context-path
-reason as its health check in `DashboardService`. No custom metrics, no Grafana, tracing or
-alerting yet; see [ADR-011](docs/adr/011-prometheus-metrics.md).
+reason as its health check in `DashboardService`. No custom metrics and no alerting yet; see
+[ADR-011](docs/adr/011-prometheus-metrics.md).
+
+**Tracing and logs (Grafana LGTM, [ADR-012](docs/adr/012-grafana-lgtm-tracing.md))**: `docker compose up -d`
+also starts `grafana/otel-lgtm` (Grafana on `http://localhost:3000`, `admin`/`admin`, OTLP on
+4318). Every service except `eureka-server` depends on `spring-boot-starter-opentelemetry` and
+exports traces and logs over OTLP HTTP; one order shows up in Tempo as a single trace across the gateway,
+the four saga services and every Kafka hop. Gotchas found by running it, not by reading docs:
+- **Boot 4 has no default OTLP endpoint.** Without
+  `management.opentelemetry.tracing.export.otlp.endpoint` no exporter is created and nothing is
+  sent, silently. Trace ids still appear in the console logs, which makes it look like it works.
+- **Sampling defaults to 10%**, so `management.tracing.sampling.probability=1.0` is set, or most
+  orders have no trace.
+- **Kafka**: the four saga services set `spring.kafka.template.observation-enabled` and
+  `spring.kafka.listener.observation-enabled`, or the trace stops at each producer.
+- **The reactive gateway** needs `spring.reactor.context-propagation=auto`.
+- **Noise**: actuator requests and the Eureka client's own calls would otherwise flood Tempo. Boot 4
+  has no property for it, so an `ObservationPredicate` drops them:
+  `common`'s `InfrastructureObservationConfiguration` (imported in the five servlet services'
+  `*Application` classes) and a local twin in `api-gateway`'s `config/`, which cannot depend on
+  `common`. Spring Security's own spans are off via `management.observations.enable.spring.security`.
+  A side effect: Prometheus no longer counts its own scrapes in `http.server.requests`.
+- **Metrics stay on the Prometheus scrape**; OTLP metrics export is off so they are not published
+  twice. `monitoring/grafana-datasources.yaml` puts the standalone Prometheus into the same Grafana.
+- **Logs go to Loki through a Logback appender.** Boot 4 autoconfigures the OTLP log exporter but
+  not the bridge from Logback, so each service has a `logback-spring.xml` (Boot's `defaults.xml` +
+  `console-appender.xml` + `OpenTelemetryAppender`; not `base.xml`, which also turns on a file
+  appender) and one bean, `common`'s `OpenTelemetryLogAppenderConfiguration` (twin in
+  `api-gateway`'s `config/`), calls `OpenTelemetryAppender.install(...)` once the SDK exists.
+  Without it the appender buffers and sends nothing. Needs `management.opentelemetry.logging.export.otlp.endpoint`
+  for the same no-default reason as traces. The appender is an alpha artifact outside Boot's BOMs, so
+  `common` and `api-gateway` import `opentelemetry-instrumentation-bom-alpha` at a pinned
+  `2.28.1-alpha`. Query it in Grafana: Explore, Loki, `{service_name="payment-service"}`; lines
+  carry `trace_id`. `logging.file.name` no longer produces a file with this config.
+- **Rebuilding `common` on Windows** fails while any service using it is running, because the JVM
+  holds `common-0.0.1-SNAPSHOT.jar` open. Stop them first.
 
 `payment-service`, `invoice-service` and `notification-service` have no REST API and used to have
 no `SecurityConfiguration` at all. Spring Security still arrives through `common`, and Boot's
