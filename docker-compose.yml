@@ -2,7 +2,7 @@
 # notification-service). Everything else in this repo (Postgres, the services
 # themselves) still runs the way CLAUDE.md documents - via `mvn spring-boot:run`
 # against a locally-installed Postgres - so this compose file deliberately only
-# covers the one new piece of infrastructure that doesn't exist locally yet: Kafka.
+# covers the infrastructure that doesn't exist locally yet: Kafka, and Prometheus for metrics.
 # Tests never depend on this - they use Testcontainers Kafka instead, started and
 # torn down per test run.
 services:
@@ -22,3 +22,14 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+  # Metrics UI at http://localhost:9090 (Status > Targets shows which services are up).
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: investorbook-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

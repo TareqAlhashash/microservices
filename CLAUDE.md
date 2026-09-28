@@ -387,6 +387,15 @@ done here to keep the demo's moving parts down. Every touched service's IT suite
 `actuatorHealth_isReachableWithoutAToken` test proving the carve-out actually works, not just
 that the property is set.
 
+Every service also exposes `/actuator/prometheus` (`micrometer-registry-prometheus`, version
+managed by Boot's BOM, `prometheus` added to the exposure list). `docker compose up -d prometheus`
+starts Prometheus on `http://localhost:9090`, configured by `monitoring/prometheus.yml` with one
+static scrape job per service (Status > Targets shows which are up). Prometheus runs in Docker
+while the services run on the host, so the targets use `host.docker.internal`. `auth-service` is
+the one job with a different `metrics_path` (`/uaa/actuator/prometheus`), for the same context-path
+reason as its health check in `DashboardService`. Nothing else in the repo changed: no custom
+metrics, no Grafana yet.
+
 ### Security scanning: SpotBugs + FindSecBugs + OWASP Dependency-Check on every module
 
 Every module except `eureka-server` has the same two static-analysis/CVE-scan plugins, bound the
