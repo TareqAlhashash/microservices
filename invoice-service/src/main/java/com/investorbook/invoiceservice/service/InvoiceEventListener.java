@@ -73,7 +73,7 @@ public class InvoiceEventListener {
 				event.getAmount(), issuedAt));
 
 		logger.info("saga: PaymentSucceeded for order {}, issued invoice {}, publishing InvoiceIssued",
-				sanitizeForLog(event.getOrderId()), invoiceNumber);
+				sanitizeForLog(event.getOrderId()), sanitizeForLog(invoiceNumber));
 		kafkaTemplate.send(Topics.INVOICE_ISSUED, event.getOrderId(), new InvoiceIssued(UUID.randomUUID().toString(),
 				event.getOrderId(), event.getCustomerEmail(), event.getAmount(), invoiceNumber, issuedAt));
 	}

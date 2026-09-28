@@ -527,6 +527,11 @@ all seven migrations, not just one:
   test library version - always check the actual overload rather than trusting a stale comment.
 - **`spring-hateoas`'s `PagedModel` constructor became `protected`** - use the `PagedModel.of(...)`
   static factory instead of `new PagedModel<>(...)`.
+- **A test can't bind a paged response to `PagedModel` with `RestTemplate`.** The body is HAL
+  (`_embedded.orders` plus a `page` block, which is what the frontend reads), and plain
+  `PagedModel` binding leaves `getContent()` empty while `getMetadata()` still works. Read the
+  body as a `String` and use `JsonPath.read(body, "$._embedded.orders[*].id")`, as
+  `OrderServiceApiIT.listOrders_filtersServerSide_byOrderId` does.
 - **Mockito/byte-buddy version overrides are gone.** Every Boot 2.2.13 module needed
   `mockito.version`/`byte-buddy.version` `pom.xml` overrides to work on JDK 21 (Boot 2.2's managed
   Mockito predates JDK 17+ bytecode support, and Boot's BOM otherwise pinned byte-buddy too old

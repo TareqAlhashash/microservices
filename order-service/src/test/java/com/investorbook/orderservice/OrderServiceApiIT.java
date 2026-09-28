@@ -52,6 +52,7 @@ import com.investorbook.common.event.PaymentRefunded;
 import com.investorbook.common.event.PaymentSucceeded;
 import com.investorbook.common.event.Topics;
 import com.investorbook.orderservice.dto.OrderResponse;
+import com.jayway.jsonpath.JsonPath;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSHeader;
 import com.nimbusds.jose.crypto.RSASSASigner;
@@ -345,12 +346,14 @@ class OrderServiceApiIT {
 
 		HttpHeaders headers = new HttpHeaders();
 		headers.setBearerAuth(tokenFor(email));
-		ResponseEntity<PagedModel<OrderResponse>> response = restTemplate.exchange(
-				"/orders?search=" + orderId.substring(0, 8), HttpMethod.GET, new HttpEntity<>(headers),
-				ORDERS_PAGE_TYPE);
+		ResponseEntity<String> response = restTemplate.exchange("/orders?search=" + orderId.substring(0, 8),
+				HttpMethod.GET, new HttpEntity<>(headers), String.class);
 
 		assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
-		assertThat(response.getBody().getContent()).extracting(OrderResponse::getId).contains(orderId);
+		// Reads the HAL body the dashboard actually consumes (_embedded.orders). Binding it to
+		// PagedModel with RestTemplate does not understand HAL and leaves content empty.
+		List<String> ids = JsonPath.read(response.getBody(), "$._embedded.orders[*].id");
+		assertThat(ids).contains(orderId);
 	}
 
 	private static ConsumerRecord<String, String> findRecordByKey(ConsumerRecords<String, String> records,
