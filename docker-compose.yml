@@ -2,7 +2,7 @@
 # notification-service). Everything else in this repo (Postgres, the services
 # themselves) still runs the way CLAUDE.md documents - via `mvn spring-boot:run`
 # against a locally-installed Postgres - so this compose file deliberately only
-# covers the infrastructure that doesn't exist locally yet: Kafka, and Prometheus for metrics.
+# covers the infrastructure that doesn't exist locally yet: Kafka, Prometheus, and Grafana LGTM.
 # Tests never depend on this - they use Testcontainers Kafka instead, started and
 # torn down per test run.
 services:
@@ -33,3 +33,17 @@ services:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Grafana, Tempo (traces), Loki (logs) and an OpenTelemetry collector in one container.
+  # Grafana UI at http://localhost:3000 (admin / admin); services send OTLP to :4318.
+  lgtm:
+    image: grafana/otel-lgtm:0.34.0
+    container_name: investorbook-lgtm
+    ports:
+      - "3000:3000"
+      - "4317:4317"
+      - "4318:4318"
+    volumes:
+      - ./monitoring/grafana-datasources.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/investorbook-prometheus.yaml:ro
+    depends_on:
+      - prometheus

@@ -7,11 +7,14 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 
 import com.investorbook.common.exception.CustomizedResponseEntityExceptionHandler;
+import com.investorbook.common.observation.InfrastructureObservationConfiguration;
+import com.investorbook.common.observation.OpenTelemetryLogAppenderConfiguration;
 
 @SpringBootApplication
 @Configuration
 @EnableDiscoveryClient
-@Import(CustomizedResponseEntityExceptionHandler.class)
+@Import({ CustomizedResponseEntityExceptionHandler.class, InfrastructureObservationConfiguration.class,
+		OpenTelemetryLogAppenderConfiguration.class })
 public class AuthServiceApplication {
 
 	public static void main(String[] args) {

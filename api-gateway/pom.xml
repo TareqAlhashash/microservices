@@ -49,6 +49,16 @@
 			<groupId>io.micrometer</groupId>
 			<artifactId>micrometer-registry-prometheus</artifactId>
 		</dependency>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-opentelemetry</artifactId>
+		</dependency>
+		<!-- Ships log lines to the OpenTelemetry SDK (and on to Loki); see
+		     OpenTelemetryLogAppenderConfig. Version comes from the alpha BOM imported below. -->
+		<dependency>
+			<groupId>io.opentelemetry.instrumentation</groupId>
+			<artifactId>opentelemetry-logback-appender-1.0</artifactId>
+		</dependency>
 
 		<!-- Modern (non-deprecated) resource-server support: verifies the same RSA-signed JWTs
 		     auth-service issues, just without the legacy spring-security-oauth2 project this
@@ -115,6 +125,15 @@
 				<groupId>org.springframework.cloud</groupId>
 				<artifactId>spring-cloud-dependencies</artifactId>
 				<version>${spring-cloud.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+			<!-- The Logback appender is an alpha artifact, so it is not in the BOMs Boot imports. This
+			     is the version Boot's own OpenTelemetry BOM chain resolves to. -->
+			<dependency>
+				<groupId>io.opentelemetry.instrumentation</groupId>
+				<artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
+				<version>2.28.1-alpha</version>
 				<type>pom</type>
 				<scope>import</scope>
 			</dependency>

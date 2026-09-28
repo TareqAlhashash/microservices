@@ -1,0 +1,10 @@
+# Adds the standalone Prometheus (the one scraping /actuator/prometheus, see prometheus.yml) to
+# the Grafana inside the LGTM container, next to its built-in Tempo (traces) and Loki (logs).
+apiVersion: 1
+
+datasources:
+  - name: InvestorBook Prometheus
+    type: prometheus
+    uid: investorbook-prometheus
+    url: http://prometheus:9090
+    editable: false

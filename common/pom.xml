@@ -42,6 +42,18 @@
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
 		</dependency>
+		<!-- Logback appender that ships log lines to the OpenTelemetry SDK (and on to Loki), for
+		     OpenTelemetryLogAppenderConfiguration. Versions come from the OpenTelemetry BOMs Boot
+		     imports. Every consumer gets the SDK through spring-boot-starter-opentelemetry. -->
+		<dependency>
+			<groupId>io.opentelemetry.instrumentation</groupId>
+			<artifactId>opentelemetry-logback-appender-1.0</artifactId>
+		</dependency>
+		<dependency>
+			<groupId>io.opentelemetry</groupId>
+			<artifactId>opentelemetry-sdk</artifactId>
+			<scope>test</scope>
+		</dependency>
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -50,6 +62,20 @@
 		</dependency>
 
 	</dependencies>
+
+	<!-- The Logback appender is an alpha artifact, so it is not in the BOMs Boot imports. This one is
+	     the version Boot's own OpenTelemetry BOM chain resolves to. -->
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>io.opentelemetry.instrumentation</groupId>
+				<artifactId>opentelemetry-instrumentation-bom-alpha</artifactId>
+				<version>2.28.1-alpha</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<build>
 		<plugins>
