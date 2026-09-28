@@ -275,199 +275,6 @@ create additional accounts - a known, named gap, not a hidden one.
   one checked-in demo RSA keypair (env-overridable), mocked payment and email. See the ADRs for
   what a production version of each would do differently.
 
-## REST API design checklist
-
-An API is exposed to the world, and everything a client can send it is part of its attack
-surface. Working through this repo mapped onto a standard checklist of what protects a REST
-API; most points are actually implemented here, and the honest gaps are named rather than
-glossed over.
-
-1. **Authentication** - proves who is calling. Username/password + a signed JWT (see "Security
-   model" above, and [ADR-002](docs/adr/002-oauth2-authentication.md) for why this isn't OAuth2):
-   `auth-service` signs a JWT directly with its RSA private key, every other service verifies it
-   with the public key via a `JwtDecoder`-backed `oauth2ResourceServer()` chain, stateless
-   (`SessionCreationPolicy.STATELESS`), default-deny except an explicit permit list
-   (`order-service/src/main/java/com/investorbook/orderservice/security/SecurityConfiguration.java`):
-   ```java
-   @Bean
-   SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter)
-           throws Exception {
-       return http.csrf(csrf -> csrf.disable())
-               .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/**", "/products", "/products/**")
-                       .permitAll().anyRequest().authenticated())
-               .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-               .oauth2ResourceServer(
-                       oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
-               .build();
-   }
-   ```
-   The authenticated caller's identity is read back off the JWT's `user_name` claim, never
-   trusted from the request body (`common/src/main/java/com/investorbook/common/util/JwtUtil.java`).
-
-2. **Authorization** - decides what an authenticated caller can access. Method-level
-   `@PreAuthorize` on every write endpoint, and the request never lets a caller act as anyone
-   but themselves (`order-service/src/main/java/com/investorbook/orderservice/controller/OrderController.java`):
-   ```java
-   // customerEmail comes from the authenticated JWT, never the request body -
-   // a client can only ever place an order as themselves.
-   @PostMapping("/orders")
-   @PreAuthorize("hasRole('MEMBER')")
-   public ResponseEntity<OrderResponse> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
-       OrderEntity order = new OrderEntity(UUID.randomUUID().toString(), currentEmail(), request.getAmount(), ...);
-   ```
-
-3. **Rate Limiting** - caps how many requests a client can make. A per-client-IP resilience4j
-   `RateLimiter` at `api-gateway`, the one edge every external call passes through
-   (`api-gateway/src/main/java/com/investorbook/apigateway/filters/RateLimitFilter.java`):
-   ```java
-   RateLimiter limiter = registry.rateLimiter(clientKey);
-   if (limiter.acquirePermission()) {
-       return chain.filter(exchange);
-   }
-   return reject(clientKey, exchange.getResponse());
-   ```
-   Registered as a plain `WebFilter` ahead of Spring Security's chain (not a Gateway
-   `GlobalFilter`, which never runs for this gateway's own locally-handled endpoints like
-   `/login`/`/actuator/**`), so it applies uniformly even to routes a `permitAll()` rule bypasses
-   security for entirely. A rejected request gets a 429 with a `Retry-After` header and the same
-   `{timestamp, message, details}` error shape as everywhere else in this system (see "Error
-   Hygiene" below). In-memory and keyed by remote address, so it doesn't share state across a
-   horizontally-scaled deployment - fine for a demo, not for real internet traffic. See the
-   class's own Javadoc for the full list.
-
-4. **Input Validation** - rejects malformed input at the boundary. Bean Validation
-   (`jakarta.validation`/`javax.validation`) annotations on every request DTO, enforced by
-   `@Valid` at the controller (`common/src/main/java/com/investorbook/common/dto/AuthRequest.java`):
-   ```java
-   @NotNull(message = "username cannot be null")
-   private String username;
-
-   @Size(min = 6, message = "password must be at least 6 char long")
-   @NotNull(message = "password cannot be null")
-   private String password;
-   ```
-   This one was a real, present-tense bug: `AuthRequest`'s constraints existed but were never
-   enforced until `@Valid` was actually added to `LoginService.login` - see "Shared error
-   handling" in `CLAUDE.md`.
-
-5. **Output Encoding** - stops untrusted data being interpreted as markup in the response.
-   **Not something this repo's own code does explicitly** - every API response is JSON (no
-   server-rendered HTML to escape), and the `frontend` React app gets JSX's default escaping for
-   free (no `dangerouslySetInnerHTML` anywhere in `frontend/src`). No CSP or
-   `X-Content-Type-Options` headers are set at the gateway; that would be the next real gap to
-   close if this went to production.
-
-6. **HTTPS Everywhere** - encrypts data in transit. **Not configured anywhere locally** - every
-   service runs plain HTTP on localhost. The target deployment terminates TLS at
-   CloudFront/the ALB, in front of every service (`docs/adr/009-aws-deployment-architecture.md`),
-   rather than each of the seven Spring Boot apps managing its own certificate.
-
-7. **Secret Rotation** - limits the blast radius when a credential leaks. Every secret that used
-   to be a literal in `application.properties` is now `${ENV_VAR:same-literal-as-before}` - the
-   default preserves today's dev behavior with nothing set, but a real deployment overrides it
-   without touching source (`auth-service/src/main/resources/application.properties`):
-   ```properties
-   spring.datasource.password=${DB_PASSWORD:pass}
-   investorbook.security.jwt.public.key=${JWT_PUBLIC_KEY:-----BEGIN PUBLIC KEY-----...}
-   ```
-   This makes rotation *possible* (change the env var, redeploy) - it doesn't rotate anything
-   automatically, and the same public key is still duplicated as the fallback literal across
-   every service's `application.properties` (see "Config & secrets" in `CLAUDE.md`).
-
-8. **Least Privilege** - each identity gets only the permissions it needs. `auth-service` grants
-   tiered `GrantedAuthority` lists rather than one blanket role, even though only the lowest tier
-   is ever assigned today (`auth-service/src/main/java/com/investorbook/authservice/security/GrantedAuthorities.java`):
-   ```java
-   case NORMAL_USER:
-       return AuthorityUtils.createAuthorityList("ROLE_MEMBER");
-   case PREMIUM_USER:
-       return AuthorityUtils.createAuthorityList("ROLE_MEMBER", "ROLE_PREMIUMMEMBER");
-   default: // ADMIN
-       return AuthorityUtils.createAuthorityList("ROLE_MEMBER", "ROLE_PREMIUMMEMBER", "ROLE_ADMIN");
-   ```
-   Same principle at the route level: `WebSecurity.ignoring()` opens up only the specific paths
-   that must be public (`/products`, `/actuator/**`, `/login`), never a whole service.
-
-9. **Idempotency Keys** - stops a retried request from double-executing. This repo's version is
-   consumer-side, not a client-supplied header: every purchase-flow service that has no other
-   state to dedupe on keeps a `processed_events` table keyed by event id, inserted with a flush
-   before any further side effect
-   (`payment-service/src/main/java/com/investorbook/paymentservice/dao/entities/ProcessedEvent.java`):
-   ```java
-   // Implements Persistable so Spring Data always attempts a real INSERT (isNew() always true)
-   // instead of a merge - a duplicate id must fail the insert, not silently succeed as an update.
-   @Override
-   public boolean isNew() {
-       return true;
-   }
-   ```
-   `order-service` uses a different mechanism for the same goal - a state-machine guard, since it
-   already has an order status to check against (see "Idempotency" in `CLAUDE.md`). What's
-   missing is the REST-level version of this (an `Idempotency-Key` header on `POST /orders` so a
-   retried HTTP request doesn't place two orders) - not built here.
-
-10. **Audit Logging** - records who did what, when. `order-service` persists one row per saga
-    event to a real table, not just console log text, purpose-built for the dashboard's
-    per-order timeline (`order-service/src/main/java/com/investorbook/orderservice/service/OrderEventLogRecorder.java`):
-    ```java
-    public void record(String orderId, String eventType, String message) {
-        repository.save(new OrderEventLogEntity(orderId, eventType, message, Instant.now()));
-    }
-    ```
-    Every Kafka listener across the saga also sanitizes attacker-influenced fields (order/event
-    ids come off the wire from whatever produced the event) before they reach a log line, closing
-    a CRLF log-injection finding SpotBugs/FindSecBugs turned up
-    (`invoice-service/src/main/java/com/investorbook/invoiceservice/service/InvoiceEventListener.java`):
-    ```java
-    logger.info("saga: PaymentSucceeded for order {}, issued invoice {}, publishing InvoiceIssued",
-            sanitizeForLog(event.getOrderId()), invoiceNumber);
-    ```
-
-11. **Dependency Scans** - finds known CVEs in third-party packages. OWASP Dependency-Check is
-    declared in every module's `pom.xml` (deliberately not bound to a lifecycle phase - see
-    below), alongside SpotBugs+FindSecBugs for static analysis, which *is* bound to `verify` and
-    runs on every build (`order-service/pom.xml`):
-    ```xml
-    <!-- CVE scan of dependencies against the NVD. Deliberately NOT bound to a lifecycle phase:
-         without an NVD_API_KEY the first sync can take hours (public API rate limits). -->
-    <plugin>
-        <groupId>org.owasp</groupId>
-        <artifactId>dependency-check-maven</artifactId>
-        <configuration>
-            <failBuildOnCVSS>7</failBuildOnCVSS>
-        </configuration>
-    </plugin>
-    ```
-    Honestly: this has never completed a run on this machine (no `NVD_API_KEY`), so it's wired in
-    but unproven - see "What's covered, honestly" above.
-
-12. **Error Hygiene** - don't leak stack traces, internal paths, or SQL details to a caller. One
-    `@ControllerAdvice`, shared via `common`, maps every uncaught exception to a uniform
-    `{timestamp, message, details}` 500 instead of a raw stack trace, while still letting Spring
-    Security's own 401/403 handling through
-    (`common/src/main/java/com/investorbook/common/exception/CustomizedResponseEntityExceptionHandler.java`):
-    ```java
-    @ExceptionHandler(Exception.class)
-    public final ResponseEntity<Object> handleAllExceptions(Exception ex, WebRequest request) {
-        ExceptionResponse exceptionResponse = new ExceptionResponse(new Date(), ex.getMessage(),
-                request.getDescription(false));
-        return new ResponseEntity<>(exceptionResponse, HttpStatus.INTERNAL_SERVER_ERROR);
-    }
-
-    // Without these, the catch-all above intercepts @PreAuthorize denials and authentication
-    // failures before Spring Security's own filter chain ever sees them - turning every 403/401
-    // into a 500. Rethrowing lets Spring Security handle them as normal.
-    @ExceptionHandler(AccessDeniedException.class)
-    public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex) throws AccessDeniedException {
-        throw ex;
-    }
-    ```
-    Wiring this into every service (it used to live only in `member-service`) is what caught the
-    403-became-500 bug called out in "Highlights" above - a real defect this checklist item
-    surfaced, not a hypothetical one. One honest caveat: `ex.getMessage()` still flows into the
-    response body, so it's shaped consistently but not scrubbed of internal detail - fine for
-    this demo, worth tightening before a real deployment.
-
 ## Running it
 
 ```bash
@@ -502,3 +309,232 @@ test before touching code, never reach green by weakening a test, run a security
 calling anything done. `bugfix-workflow`, `integration-test-loop`, and `owasp-java-check`, each
 is an agent instruction set, not a guarantee; the judgment calls throughout were made by
 reviewing what the agent actually produced, not by trusting a green checkmark.
+
+## REST API design checklist
+
+How this repo maps onto a standard REST API security checklist. Each point is marked Done,
+Partial or Not done, and the gaps are named rather than hidden. The code behind each check is
+folded under the table.
+
+| # | Check | Status | What this repo does |
+|---|---|---|---|
+| 1 | Authentication | Done | `auth-service` signs a JWT with an RSA key, every other service verifies it. Stateless, default-deny. See [ADR-002](docs/adr/002-oauth2-authentication.md). |
+| 2 | Authorization | Done | `@PreAuthorize` on write endpoints. The caller comes from the JWT, never the request body. |
+| 3 | Rate limiting | Partial | Per-IP limiter at `api-gateway`, answers 429 with `Retry-After`. In-memory, so not shared across instances. |
+| 4 | Input validation | Done | Bean Validation on every request DTO, enforced by `@Valid`. |
+| 5 | Output encoding | Not done | Responses are JSON and React escapes by default, but no CSP or `X-Content-Type-Options` headers are set. |
+| 6 | HTTPS everywhere | Not done locally | Plain HTTP on localhost. The AWS design terminates TLS at CloudFront and the ALB ([ADR-009](docs/adr/009-aws-deployment-architecture.md)). |
+| 7 | Secret rotation | Partial | Secrets are `${ENV_VAR:default}`, so a deployment can override them. Nothing rotates automatically. |
+| 8 | Least privilege | Partial | Tiered roles, and only the paths that must be public are opened. Only the lowest tier is ever assigned. |
+| 9 | Idempotency | Partial | Kafka consumers dedupe by event id. No `Idempotency-Key` header on `POST /orders`. |
+| 10 | Audit logging | Done | Every saga event is stored per order. Fields from the wire are sanitized before they reach a log line. |
+| 11 | Dependency scans | Partial | SpotBugs and FindSecBugs run on every build. OWASP Dependency-Check is wired in but has never completed a run (no NVD API key). |
+| 12 | Error hygiene | Partial | One shared handler returns `{timestamp, message, details}`. The exception message still reaches the response body. |
+
+### Code behind each check
+
+<details>
+<summary><b>1. Authentication</b>: default-deny JWT filter chain</summary>
+
+`order-service/src/main/java/com/investorbook/orderservice/security/SecurityConfiguration.java`
+
+```java
+@Bean
+SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthenticationConverter jwtAuthenticationConverter)
+        throws Exception {
+    return http.csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth.requestMatchers("/actuator/**", "/products", "/products/**")
+                    .permitAll().anyRequest().authenticated())
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .oauth2ResourceServer(
+                    oauth2 -> oauth2.jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)))
+            .build();
+}
+```
+
+The caller's identity is read from the JWT's `user_name` claim (`common/.../util/JwtUtil.java`).
+
+</details>
+
+<details>
+<summary><b>2. Authorization</b>: role check, and the caller is always the token's owner</summary>
+
+`order-service/src/main/java/com/investorbook/orderservice/controller/OrderController.java`
+
+```java
+// customerEmail comes from the authenticated JWT, never the request body -
+// a client can only ever place an order as themselves.
+@PostMapping("/orders")
+@PreAuthorize("hasRole('MEMBER')")
+public ResponseEntity<OrderResponse> placeOrder(@Valid @RequestBody PlaceOrderRequest request) {
+    OrderEntity order = new OrderEntity(UUID.randomUUID().toString(), currentEmail(), request.getAmount(), ...);
+```
+
+</details>
+
+<details>
+<summary><b>3. Rate limiting</b>: per-client limiter at the gateway</summary>
+
+`api-gateway/src/main/java/com/investorbook/apigateway/filters/RateLimitFilter.java`
+
+```java
+RateLimiter limiter = registry.rateLimiter(clientKey);
+if (limiter.acquirePermission()) {
+    return chain.filter(exchange);
+}
+return reject(clientKey, exchange.getResponse());
+```
+
+Registered as a plain `WebFilter` ahead of Spring Security, not a Gateway `GlobalFilter`, so it also
+covers the gateway's own endpoints (`/login`, `/actuator/**`) and `permitAll()` routes. A rejected
+request gets a 429, a `Retry-After` header and the standard error body. It is in-memory and keyed
+by remote address, so it does not survive a scaled-out deployment.
+
+</details>
+
+<details>
+<summary><b>4. Input validation</b>: Bean Validation at the boundary</summary>
+
+`common/src/main/java/com/investorbook/common/dto/AuthRequest.java`
+
+```java
+@NotNull(message = "username cannot be null")
+private String username;
+
+@Size(min = 6, message = "password must be at least 6 char long")
+@NotNull(message = "password cannot be null")
+private String password;
+```
+
+This was a real bug: the constraints existed but were never enforced until `@Valid` was added to
+`LoginService.login`.
+
+</details>
+
+<details>
+<summary><b>7. Secret rotation</b>: secrets come from the environment</summary>
+
+`auth-service/src/main/resources/application.properties`
+
+```properties
+spring.datasource.password=${DB_PASSWORD:pass}
+investorbook.security.jwt.public.key=${JWT_PUBLIC_KEY:-----BEGIN PUBLIC KEY-----...}
+```
+
+Rotation is possible (change the variable, redeploy) but nothing does it automatically, and the
+same public key is still duplicated as the fallback in every service.
+
+</details>
+
+<details>
+<summary><b>8. Least privilege</b>: tiered roles</summary>
+
+`auth-service/src/main/java/com/investorbook/authservice/security/GrantedAuthorities.java`
+
+```java
+case NORMAL_USER:
+    return AuthorityUtils.createAuthorityList("ROLE_MEMBER");
+case PREMIUM_USER:
+    return AuthorityUtils.createAuthorityList("ROLE_MEMBER", "ROLE_PREMIUMMEMBER");
+default: // ADMIN
+    return AuthorityUtils.createAuthorityList("ROLE_MEMBER", "ROLE_PREMIUMMEMBER", "ROLE_ADMIN");
+```
+
+At the route level, only the specific public paths are opened (`/products`, `/actuator/**`,
+`/login`), never a whole service.
+
+</details>
+
+<details>
+<summary><b>9. Idempotency</b>: dedupe by event id</summary>
+
+`payment-service/src/main/java/com/investorbook/paymentservice/dao/entities/ProcessedEvent.java`
+
+```java
+// Implements Persistable so Spring Data always attempts a real INSERT (isNew() always true)
+// instead of a merge - a duplicate id must fail the insert, not silently succeed as an update.
+@Override
+public boolean isNew() {
+    return true;
+}
+```
+
+`payment-service`, `invoice-service` and `notification-service` keep a `processed_events` table.
+`order-service` uses a state-machine guard instead, because it already has an order status to
+check. The missing piece is the REST-level version: an `Idempotency-Key` header on `POST /orders`
+so a retried request does not place two orders.
+
+</details>
+
+<details>
+<summary><b>10. Audit logging</b>: persisted saga events, sanitized log lines</summary>
+
+`order-service/src/main/java/com/investorbook/orderservice/service/OrderEventLogRecorder.java`
+
+```java
+public void record(String orderId, String eventType, String message) {
+    repository.save(new OrderEventLogEntity(orderId, eventType, message, Instant.now()));
+}
+```
+
+`invoice-service/src/main/java/com/investorbook/invoiceservice/service/InvoiceEventListener.java`
+
+```java
+logger.info("saga: PaymentSucceeded for order {}, issued invoice {}, publishing InvoiceIssued",
+        sanitizeForLog(event.getOrderId()), invoiceNumber);
+```
+
+Order and event ids arrive off the wire, so every Kafka listener sanitizes them before logging.
+That closed a CRLF log-injection finding from SpotBugs and FindSecBugs.
+
+</details>
+
+<details>
+<summary><b>11. Dependency scans</b>: OWASP Dependency-Check and SpotBugs</summary>
+
+`order-service/pom.xml`
+
+```xml
+<!-- CVE scan of dependencies against the NVD. Deliberately NOT bound to a lifecycle phase:
+     without an NVD_API_KEY the first sync can take hours (public API rate limits). -->
+<plugin>
+    <groupId>org.owasp</groupId>
+    <artifactId>dependency-check-maven</artifactId>
+    <configuration>
+        <failBuildOnCVSS>7</failBuildOnCVSS>
+    </configuration>
+</plugin>
+```
+
+SpotBugs and FindSecBugs are bound to `verify`. Dependency-Check is wired in but has never
+completed a run here, so treat it as unproven.
+
+</details>
+
+<details>
+<summary><b>12. Error hygiene</b>: one handler, no stack traces, security errors pass through</summary>
+
+`common/src/main/java/com/investorbook/common/exception/CustomizedResponseEntityExceptionHandler.java`
+
+```java
+@ExceptionHandler(Exception.class)
+public final ResponseEntity<Object> handleAllExceptions(Exception ex, WebRequest request) {
+    ExceptionResponse exceptionResponse = new ExceptionResponse(new Date(), ex.getMessage(),
+            request.getDescription(false));
+    return new ResponseEntity<>(exceptionResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+}
+
+// Without these, the catch-all above intercepts @PreAuthorize denials and authentication
+// failures before Spring Security's own filter chain ever sees them - turning every 403/401
+// into a 500. Rethrowing lets Spring Security handle them as normal.
+@ExceptionHandler(AccessDeniedException.class)
+public ResponseEntity<Object> handleAccessDenied(AccessDeniedException ex) throws AccessDeniedException {
+    throw ex;
+}
+```
+
+Wiring this into every service is what caught a real bug: the catch-all was turning every 403 into a
+500. Caveat: `ex.getMessage()` still flows into the body, so the shape is consistent but the
+content is not scrubbed. Fine for a demo, worth tightening before production.
+
+</details>
